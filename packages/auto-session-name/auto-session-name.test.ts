@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { describe, expect, test } from "vitest";
 import {
 	backfillSkillSessionNameInFile,
+	backfillSkillSessionNames,
 	extractSkillName,
 	extractUserRequest,
 	makeSessionTitle,
@@ -143,6 +144,60 @@ describe("skill-started session naming", () => {
 			expect(updated).toContain(
 				'"name":"systematic-debugging: Find the root cause before fixing this issue."',
 			);
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+
+	test("skips historical backfill files over the bounded byte cap", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "pi-session-name-test-"));
+		try {
+			const sessionPath = join(dir, "session.jsonl");
+			await writeFile(
+				sessionPath,
+				[
+					jsonLine({
+						type: "message",
+						id: "aaaaaaaa",
+						message: { role: "user", content: otherSkillPrefixedPrompt },
+					}),
+					"x".repeat(1024),
+				].join(""),
+			);
+
+			expect(
+				await backfillSkillSessionNameInFile(sessionPath, { maxFileBytes: 64 }),
+			).toBe(false);
+			expect(await readFile(sessionPath, "utf8")).not.toContain(
+				'"type":"session_info"',
+			);
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+
+	test("historical backfill caps the number of files it reads", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "pi-session-name-test-"));
+		try {
+			for (const name of ["one.jsonl", "two.jsonl"]) {
+				await writeFile(
+					join(dir, name),
+					jsonLine({
+						type: "message",
+						id: name,
+						message: { role: "user", content: otherSkillPrefixedPrompt },
+					}),
+				);
+			}
+
+			expect(
+				await backfillSkillSessionNames(dir, {
+					maxFiles: 1,
+					maxDirectories: 10,
+					maxFileBytes: 4096,
+					maxElapsedMs: 2000,
+				}),
+			).toBe(1);
 		} finally {
 			await rm(dir, { recursive: true, force: true });
 		}

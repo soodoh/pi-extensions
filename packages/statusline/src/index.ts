@@ -1,13 +1,13 @@
-import { spawn } from "node:child_process";
 import { resolve } from "node:path";
+import {
+	type GitStatus,
+	getGitStatus,
+	invalidateGit,
+	type ReadonlyFooterDataProvider,
+} from "./git-status";
 
 type Theme = {
 	fg(color: string, text: string): string;
-};
-
-type ReadonlyFooterDataProvider = {
-	getGitBranch(): string | null;
-	onBranchChange(callback: () => void): () => void;
 };
 
 type TuiLike = {
@@ -136,10 +136,9 @@ const ANSI_RESET = "\x1b[0m";
 const SEPARATOR_COLOR = "\x1b[38;5;244m";
 const POWERLINE_THIN_LEFT = "\uE0B1";
 const ASCII_THIN_LEFT = "|";
-const CACHE_TTL_MS = 1000;
-const BRANCH_TTL_MS = 500;
 const PROVIDER_USAGE_TTL_MS = 5 * 60 * 1000;
 const PROVIDER_USAGE_FETCH_TIMEOUT_MS = 5000;
+const PROVIDER_USAGE_ENV = "PI_STATUSLINE_PROVIDER_USAGE";
 const PROVIDER_BADGE_SEPARATOR = " · ";
 
 const NERD_ICONS = {
@@ -186,13 +185,6 @@ type AssistantTokenUsage = {
 	output: number;
 	cacheRead: number;
 	cacheWrite: number;
-};
-
-type GitStatus = {
-	branch: string | null;
-	staged: number;
-	unstaged: number;
-	untracked: number;
 };
 
 type ProviderUsageAuthKind = "oauth" | "api_key" | "unknown";
@@ -253,20 +245,16 @@ const PROVIDER_FAMILY_ORDER = [
 	"google-antigravity",
 ];
 
-type GitStatusCacheEntry = Omit<GitStatus, "branch"> & { timestamp: number };
-type GitBranchCacheEntry = { branch: string | null; timestamp: number };
-
-const cachedStatusByCwd = new Map<string, GitStatusCacheEntry>();
-const cachedBranchByCwd = new Map<string, GitBranchCacheEntry>();
-const pendingStatusFetchByCwd = new Map<string, Promise<void>>();
-const pendingBranchFetchByCwd = new Map<string, Promise<void>>();
-let statusInvalidation = 0;
-let branchInvalidation = 0;
 const providerUsageCache = new Map<string, ProviderUsageCacheEntry>();
 let providerUsageInvalidation = 0;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isProviderUsageEnabled(): boolean {
+	const value = process.env[PROVIDER_USAGE_ENV]?.trim().toLowerCase();
+	return value === "1" || value === "true" || value === "yes" || value === "on";
 }
 
 function hasNerdFonts(): boolean {
@@ -327,145 +315,6 @@ function stripAnsi(text: string): string {
 
 function displayLength(text: string): number {
 	return Array.from(stripAnsi(text)).length;
-}
-
-function runGit(
-	cwd: string,
-	args: string[],
-	timeoutMs = 200,
-): Promise<string | null> {
-	return new Promise((resolve) => {
-		const proc = spawn("git", args, {
-			cwd,
-			stdio: ["ignore", "pipe", "pipe"],
-		});
-		let stdout = "";
-		let resolved = false;
-
-		const timeout = setTimeout(() => {
-			proc.kill();
-			finish(null);
-		}, timeoutMs);
-
-		function finish(result: string | null): void {
-			if (resolved) return;
-			resolved = true;
-			clearTimeout(timeout);
-			resolve(result);
-		}
-
-		proc.stdout.on("data", (data) => {
-			stdout += data.toString();
-		});
-		proc.on("close", (code) => finish(code === 0 ? stdout.trim() : null));
-		proc.on("error", () => finish(null));
-	});
-}
-
-function parseGitStatus(output: string): Omit<GitStatus, "branch"> {
-	let staged = 0;
-	let unstaged = 0;
-	let untracked = 0;
-
-	for (const line of output.split("\n")) {
-		if (!line) continue;
-		const x = line[0];
-		const y = line[1];
-
-		if (x === "?" && y === "?") {
-			untracked++;
-			continue;
-		}
-		if (x && x !== " " && x !== "?") staged++;
-		if (y && y !== " ") unstaged++;
-	}
-
-	return { staged, unstaged, untracked };
-}
-
-async function fetchGitBranch(cwd: string): Promise<string | null> {
-	const branch = await runGit(cwd, ["branch", "--show-current"]);
-	if (branch === null) return null;
-	if (branch) return branch;
-
-	const sha = await runGit(cwd, ["rev-parse", "--short", "HEAD"]);
-	return sha ? `${sha} (detached)` : "detached";
-}
-
-function getCurrentBranch(
-	cwd: string,
-	providerBranch: string | null,
-	onUpdate: () => void,
-): string | null {
-	const now = Date.now();
-	const cachedBranch = cachedBranchByCwd.get(cwd);
-	if (cachedBranch && now - cachedBranch.timestamp < BRANCH_TTL_MS) {
-		return cachedBranch.branch;
-	}
-
-	if (!pendingBranchFetchByCwd.has(cwd)) {
-		const fetchId = branchInvalidation;
-		const pending = fetchGitBranch(cwd).then((result) => {
-			if (fetchId === branchInvalidation) {
-				cachedBranchByCwd.set(cwd, {
-					branch: result,
-					timestamp: Date.now(),
-				});
-				onUpdate();
-			}
-			pendingBranchFetchByCwd.delete(cwd);
-		});
-		pendingBranchFetchByCwd.set(cwd, pending);
-	}
-
-	return cachedBranch ? cachedBranch.branch : providerBranch;
-}
-
-function getGitStatus(
-	cwd: string,
-	providerBranch: string | null,
-	onUpdate: () => void,
-): GitStatus {
-	const now = Date.now();
-	const branch = getCurrentBranch(cwd, providerBranch, onUpdate);
-	const cachedStatus = cachedStatusByCwd.get(cwd);
-
-	if (cachedStatus && now - cachedStatus.timestamp < CACHE_TTL_MS) {
-		return { branch, ...cachedStatus };
-	}
-
-	if (!pendingStatusFetchByCwd.has(cwd)) {
-		const fetchId = statusInvalidation;
-		const pending = runGit(cwd, ["status", "--porcelain"], 500).then(
-			(output) => {
-				if (fetchId === statusInvalidation) {
-					const parsed = output
-						? parseGitStatus(output)
-						: { staged: 0, unstaged: 0, untracked: 0 };
-					cachedStatusByCwd.set(cwd, {
-						...parsed,
-						timestamp: Date.now(),
-					});
-					onUpdate();
-				}
-				pendingStatusFetchByCwd.delete(cwd);
-			},
-		);
-		pendingStatusFetchByCwd.set(cwd, pending);
-	}
-
-	return cachedStatus
-		? { branch, ...cachedStatus }
-		: { branch, staged: 0, unstaged: 0, untracked: 0 };
-}
-
-function invalidateGit(): void {
-	cachedStatusByCwd.clear();
-	cachedBranchByCwd.clear();
-	pendingStatusFetchByCwd.clear();
-	pendingBranchFetchByCwd.clear();
-	statusInvalidation++;
-	branchInvalidation++;
 }
 
 function isAssistantMessageWithUsage(
@@ -1326,8 +1175,13 @@ function buildCompactLine(
 	onUpdate: () => void,
 	width: number,
 ): string {
-	const providerUsageTargets = discoverProviderUsageTargets(ctx);
-	refreshProviderUsage(ctx, providerUsageTargets, onUpdate);
+	const providerUsageEnabled = isProviderUsageEnabled();
+	const providerUsageTargets = providerUsageEnabled
+		? discoverProviderUsageTargets(ctx)
+		: [];
+	if (providerUsageEnabled) {
+		refreshProviderUsage(ctx, providerUsageTargets, onUpdate);
+	}
 
 	const contextTokens = collectContextTokens(ctx);
 	const providerBranch = footerData?.getGitBranch() ?? null;
@@ -1335,12 +1189,12 @@ function buildCompactLine(
 	const modelPart = renderModel(ctx, theme);
 	const gitPart = renderGit(git, theme);
 	const contextPart = renderContext(ctx, contextTokens, theme);
-	const providerPart = renderProviderUsage(providerUsageTargets, theme, false);
-	const activeProviderPart = renderProviderUsage(
-		providerUsageTargets,
-		theme,
-		true,
-	);
+	const providerPart = providerUsageEnabled
+		? renderProviderUsage(providerUsageTargets, theme, false)
+		: undefined;
+	const activeProviderPart = providerUsageEnabled
+		? renderProviderUsage(providerUsageTargets, theme, true)
+		: undefined;
 
 	const fullLine = formatLine([modelPart, gitPart, providerPart, contextPart]);
 	if (!width || displayLength(fullLine) <= width) return fullLine;
@@ -1364,13 +1218,25 @@ export default function statusline(pi: ExtensionAPI): void {
 	const requestRender = () => tuiRef?.requestRender?.();
 	const refreshCurrentProviderUsage = (ctx: ExtensionContext): void => {
 		currentCtx = ctx;
-		refreshProviderUsage(ctx, discoverProviderUsageTargets(ctx), requestRender);
+		if (isProviderUsageEnabled()) {
+			refreshProviderUsage(
+				ctx,
+				discoverProviderUsageTargets(ctx),
+				requestRender,
+			);
+		}
 	};
 
 	function install(ctx: ExtensionContext): void {
 		if (!ctx.hasUI) return;
 		currentCtx = ctx;
-		refreshProviderUsage(ctx, discoverProviderUsageTargets(ctx), requestRender);
+		if (isProviderUsageEnabled()) {
+			refreshProviderUsage(
+				ctx,
+				discoverProviderUsageTargets(ctx),
+				requestRender,
+			);
+		}
 
 		ctx.ui.setFooter((tui, _theme, data) => {
 			tuiRef = tui;

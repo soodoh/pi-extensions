@@ -134,20 +134,15 @@ test("ghost decorator installation wraps future editor factories instead of rein
 		},
 	};
 	const state = createOptions();
-	let installState: ReturnType<typeof syncGhostEditorDecorator>;
 
-	installState = syncGhostEditorDecorator({
-		state: installState,
+	syncGhostEditorDecorator({
 		context: ctx,
-		sessionFile: "/tmp/session.json",
 		options: state.options,
 	});
 	expect(originalSetEditorCalls.length).toBe(1);
 
-	installState = syncGhostEditorDecorator({
-		state: installState,
+	syncGhostEditorDecorator({
 		context: ctx,
-		sessionFile: "/tmp/session.json",
 		options: state.options,
 	});
 	expect(originalSetEditorCalls.length).toBe(1);

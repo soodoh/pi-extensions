@@ -9,7 +9,7 @@ This package was created to provide similar statusline-focused functionality to 
 - Renders a compact statusline below the editor.
 - Shows the active model name.
 - Shows the current git branch plus staged and unstaged change counts.
-- Shows provider usage badges when Pi exposes the relevant provider/auth data.
+- Shows provider usage badges when explicitly enabled and Pi exposes the relevant provider/auth data.
 - Shows context usage as percentage plus context window, with warning colors above 70% and 90%.
 - Indicates auto-compaction when Pi reports it as enabled.
 - Adapts to terminal width by hiding less important provider detail first.
@@ -63,12 +63,18 @@ The rendered line is width-aware and may omit provider detail in narrow terminal
 | -------------- | ------------------------------------------------------------------------------------------------------------------ |
 | Model          | Current Pi model name, with a shorter display for Claude model names.                                              |
 | Git            | Branch name, staged `+n`, and unstaged `*n` markers. Untracked files still make the branch appear dirty.           |
-| Provider usage | Usage or balance information for supported configured providers when available.                                    |
+| Provider usage | Usage or balance information for supported configured providers when enabled and available.                        |
 | Context        | Current context percentage and context window, colored normally below 70%, warning above 70%, and error above 90%. |
 
 ## Configuration
 
 There is no settings file for this package.
+
+Provider usage network lookups are disabled by default. This prevents statusline rendering from retrieving provider tokens or calling provider quota endpoints unless you explicitly opt in:
+
+```bash
+PI_STATUSLINE_PROVIDER_USAGE=1 pi   # enable provider usage badges and quota fetches
+```
 
 Nerd Font detection can be overridden with an environment variable:
 
@@ -83,7 +89,7 @@ Without an override, the extension enables Nerd Font icons for common terminals 
 
 - Git status is fetched asynchronously with short-lived caches so rendering stays responsive.
 - Running the `bash` tool invalidates git status so the line updates after filesystem changes.
-- Provider usage is best-effort and depends on what Pi exposes for the selected model/provider and authentication method.
+- Provider usage is opt-in, best-effort, and depends on what Pi exposes for the selected model/provider and authentication method.
 - The package intentionally does not persist presets or expose UI controls.
 
 ## Development

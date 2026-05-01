@@ -13,10 +13,7 @@ import {
 	type PromptSuggesterBranchEntry,
 	type PromptSuggesterExtensionContext,
 } from "./infra/pi/extension-adapter";
-import {
-	type GhostEditorInstallState,
-	syncGhostEditorDecorator,
-} from "./infra/pi/ghost-editor-installation";
+import { syncGhostEditorDecorator } from "./infra/pi/ghost-editor-installation";
 import { refreshSuggesterUi } from "./infra/pi/ui-adapter";
 import { createUiContext, type UiContextLike } from "./infra/pi/ui-context";
 
@@ -60,37 +57,24 @@ export default function suggester(pi: PromptSuggesterApi) {
 	const compositionPromises = new Map<string, Promise<AppComposition>>();
 	const compositionKeysBySessionManager = new WeakMap<object, string>();
 	const sessionManagerKeys = new WeakMap<object, string>();
-	const ghostEditorInstallStateBySession = new Map<
-		string,
-		GhostEditorInstallState | undefined
-	>();
 	let nextAnonymousSessionId = 1;
 
 	function syncGhostEditorInstallation(
 		ctx: ExtensionContext,
 		composition: AppComposition,
-		sessionKey: string,
 	): void {
 		if (!ctx.hasUI) return;
-		const sessionFile = ctx.sessionManager.getSessionFile() ?? null;
-		const ghostEditorInstallState =
-			ghostEditorInstallStateBySession.get(sessionKey);
-		ghostEditorInstallStateBySession.set(
-			sessionKey,
-			syncGhostEditorDecorator({
-				state: ghostEditorInstallState,
-				context: ctx,
-				sessionFile,
-				options: {
-					getSuggestion: () => composition.runtimeRef.getSuggestion(),
-					getSuggestionRevision: () =>
-						composition.runtimeRef.getSuggestionRevision(),
-					ghostAcceptKeys: composition.config.suggestion.ghostAcceptKeys,
-					ghostAcceptAndSendKeys:
-						composition.config.suggestion.ghostAcceptAndSendKeys,
-				},
-			}),
-		);
+		syncGhostEditorDecorator({
+			context: ctx,
+			options: {
+				getSuggestion: () => composition.runtimeRef.getSuggestion(),
+				getSuggestionRevision: () =>
+					composition.runtimeRef.getSuggestionRevision(),
+				ghostAcceptKeys: composition.config.suggestion.ghostAcceptKeys,
+				ghostAcceptAndSendKeys:
+					composition.config.suggestion.ghostAcceptAndSendKeys,
+			},
+		});
 	}
 
 	function resolveSessionCwd(ctx: PromptSuggesterExtensionContext): string {
@@ -173,7 +157,6 @@ export default function suggester(pi: PromptSuggesterApi) {
 		} catch {
 			// If composition failed during startup, there is no runtime context to clear.
 		} finally {
-			ghostEditorInstallStateBySession.delete(key);
 			compositionPromises.delete(key);
 		}
 	}
@@ -191,7 +174,7 @@ export default function suggester(pi: PromptSuggesterApi) {
 		composition: AppComposition,
 	): void {
 		if (!isExtensionContext(ctx) || !ctx.hasUI) return;
-		syncGhostEditorInstallation(ctx, composition, compositionKey(ctx));
+		syncGhostEditorInstallation(ctx, composition);
 		refreshSuggesterUi(getUiContext(composition));
 	}
 

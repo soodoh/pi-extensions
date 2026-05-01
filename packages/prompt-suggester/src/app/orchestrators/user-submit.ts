@@ -12,7 +12,7 @@ interface UserSubmitContext {
 
 interface UserSubmitOrchestratorDeps {
 	stateStore: StateStore;
-	steeringClassifier: SteeringClassifier;
+	steeringClassifier: Pick<SteeringClassifier, "classify">;
 	clock: Clock;
 	logger: Logger;
 	suggestionSink: SuggestionSink;

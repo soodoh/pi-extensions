@@ -43,6 +43,14 @@ const LEADING_SKILL_RE = /^\s*<skill\b([^>]*)>[\s\S]*?<\/skill>\s*/i;
 const SKILL_NAME_RE = /\bname=(?:"([^"]+)"|'([^']+)')/i;
 const DEFAULT_MAX_TITLE_LENGTH = 72;
 const SESSION_INFO_TYPE = "session_info";
+const DEFAULT_BACKFILL_LIMITS = {
+	maxFiles: 200,
+	maxDirectories: 500,
+	maxFileBytes: 256 * 1024,
+	maxElapsedMs: 2000,
+};
+
+type BackfillLimits = typeof DEFAULT_BACKFILL_LIMITS;
 
 let didBackfillExistingSessions = false;
 
@@ -179,7 +187,10 @@ const getFirstUserMessageText = (
 
 export const backfillSkillSessionNameInFile = async (
 	sessionPath: string,
+	limits: Pick<BackfillLimits, "maxFileBytes"> = DEFAULT_BACKFILL_LIMITS,
 ): Promise<boolean> => {
+	const fileStat = await stat(sessionPath);
+	if (!fileStat.isFile() || fileStat.size > limits.maxFileBytes) return false;
 	const content = await readFile(sessionPath, "utf8");
 	const entries = parseJsonlEntries(content);
 	if (getLatestSessionName(entries)) {
@@ -212,39 +223,73 @@ export const backfillSkillSessionNameInFile = async (
 	return true;
 };
 
-const findSessionFiles = async (directory: string): Promise<string[]> => {
-	let entries: Dirent[];
-	try {
-		entries = await readdir(directory, { withFileTypes: true });
-	} catch {
-		return [];
+const backfillDeadline = (startedAt: number, limits: BackfillLimits): number =>
+	startedAt + limits.maxElapsedMs;
+
+const hasBackfillTimeRemaining = (deadline: number): boolean =>
+	Date.now() <= deadline;
+
+const findSessionFiles = async (
+	directory: string,
+	limits: BackfillLimits,
+	deadline: number,
+): Promise<string[]> => {
+	const files: string[] = [];
+	const pendingDirectories = [directory];
+	let visitedDirectories = 0;
+
+	while (
+		pendingDirectories.length > 0 &&
+		files.length < limits.maxFiles &&
+		visitedDirectories < limits.maxDirectories &&
+		hasBackfillTimeRemaining(deadline)
+	) {
+		const current = pendingDirectories.shift();
+		if (!current) break;
+		visitedDirectories += 1;
+		let entries: Dirent[];
+		try {
+			entries = await readdir(current, { withFileTypes: true });
+		} catch {
+			continue;
+		}
+
+		for (const entry of entries) {
+			if (
+				!hasBackfillTimeRemaining(deadline) ||
+				files.length >= limits.maxFiles
+			) {
+				break;
+			}
+			const fullPath = join(current, entry.name);
+			if (entry.isDirectory()) {
+				if (
+					visitedDirectories + pendingDirectories.length <
+					limits.maxDirectories
+				) {
+					pendingDirectories.push(fullPath);
+				}
+				continue;
+			}
+			if (entry.isFile() && entry.name.endsWith(".jsonl")) files.push(fullPath);
+		}
 	}
 
-	const files = await Promise.all(
-		entries.map(async (entry) => {
-			const fullPath = join(directory, entry.name);
-			if (entry.isDirectory()) {
-				return findSessionFiles(fullPath);
-			}
-			return entry.isFile() && entry.name.endsWith(".jsonl") ? [fullPath] : [];
-		}),
-	);
-
-	return files.flat();
+	return files;
 };
 
 export const backfillSkillSessionNames = async (
 	sessionsDir = join(homedir(), ".pi", "agent", "sessions"),
+	limits: BackfillLimits = DEFAULT_BACKFILL_LIMITS,
 ): Promise<number> => {
-	const sessionFiles = await findSessionFiles(sessionsDir);
+	const deadline = backfillDeadline(Date.now(), limits);
+	const sessionFiles = await findSessionFiles(sessionsDir, limits, deadline);
 	let changedCount = 0;
 
 	for (const sessionFile of sessionFiles) {
+		if (!hasBackfillTimeRemaining(deadline)) break;
 		try {
-			if (
-				(await stat(sessionFile)).isFile() &&
-				(await backfillSkillSessionNameInFile(sessionFile))
-			) {
+			if (await backfillSkillSessionNameInFile(sessionFile, limits)) {
 				changedCount++;
 			}
 		} catch {
@@ -254,6 +299,14 @@ export const backfillSkillSessionNames = async (
 
 	return changedCount;
 };
+
+function scheduleHistoricalBackfill(): void {
+	if (didBackfillExistingSessions) return;
+	didBackfillExistingSessions = true;
+	setTimeout(() => {
+		void backfillSkillSessionNames().catch(() => undefined);
+	}, 0);
+}
 
 const maybeNameSkillSession = (
 	pi: ExtensionAPI,
@@ -306,12 +359,8 @@ export default function (pi: ExtensionAPI) {
 		);
 	});
 
-	pi.on("session_start", async (_event, ctx) => {
+	pi.on("session_start", (_event, ctx) => {
 		maybeNameSkillSession(pi, ctx.sessionManager.getBranch() as SessionEntry[]);
-
-		if (!didBackfillExistingSessions) {
-			didBackfillExistingSessions = true;
-			await backfillSkillSessionNames();
-		}
+		scheduleHistoricalBackfill();
 	});
 }

@@ -6,10 +6,10 @@ import type { ReseedRunner } from "./reseed-runner";
 import type { SuggestionSink } from "./turn-end";
 
 interface SessionStartOrchestratorDeps {
-	seedStore: SeedStore;
+	seedStore: Pick<SeedStore, "load">;
 	stateStore: StateStore;
-	stalenessChecker: StalenessChecker;
-	reseedRunner: ReseedRunner;
+	stalenessChecker: Pick<StalenessChecker, "check">;
+	reseedRunner: Pick<ReseedRunner, "trigger">;
 	suggestionSink: SuggestionSink;
 	logger: Logger;
 	checkForStaleness: boolean;

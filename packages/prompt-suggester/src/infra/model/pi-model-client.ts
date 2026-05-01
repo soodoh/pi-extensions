@@ -453,6 +453,10 @@ export function globToRegExp(glob: string): RegExp {
 	return new RegExp(`^${pattern}$`, "i");
 }
 
+type SeedDraftValidation =
+	| { ok: true }
+	| { ok: false; reason: string; retryable: boolean };
+
 function validateSeedCoverage(draft: SeedDraft): {
 	ok: boolean;
 	reason?: string;
@@ -490,6 +494,59 @@ function validateSeedCoverage(draft: SeedDraft): {
 	}
 
 	return { ok: true };
+}
+
+function validateFinalSeedDraft(draft: SeedDraft): SeedDraftValidation {
+	if (!draft.projectIntentSummary) {
+		return {
+			ok: false,
+			reason: "Seeder final response missing projectIntentSummary",
+			retryable: false,
+		};
+	}
+	if (!draft.objectivesSummary) {
+		return {
+			ok: false,
+			reason: "Seeder final response missing objectivesSummary",
+			retryable: false,
+		};
+	}
+	if (!draft.constraintsSummary) {
+		return {
+			ok: false,
+			reason: "Seeder final response missing constraintsSummary",
+			retryable: false,
+		};
+	}
+	if (!draft.principlesGuidelinesSummary) {
+		return {
+			ok: false,
+			reason: "Seeder final response missing principlesGuidelinesSummary",
+			retryable: false,
+		};
+	}
+	if (!draft.implementationStatusSummary) {
+		return {
+			ok: false,
+			reason: "Seeder final response missing implementationStatusSummary",
+			retryable: false,
+		};
+	}
+	if (draft.keyFiles.length === 0) {
+		return {
+			ok: false,
+			reason: "Seeder final response produced no keyFiles",
+			retryable: false,
+		};
+	}
+	const coverage = validateSeedCoverage(draft);
+	return coverage.ok
+		? { ok: true }
+		: {
+				ok: false,
+				reason: coverage.reason ?? "Seeder final response failed coverage",
+				retryable: true,
+			};
 }
 
 export class PiModelClient implements ModelClient {
@@ -544,25 +601,10 @@ export class PiModelClient implements ModelClient {
 
 				if (response.type === "final") {
 					const draft = coerceSeedDraft(response.seed);
-					if (!draft.projectIntentSummary)
-						throw new Error(
-							"Seeder final response missing projectIntentSummary",
-						);
-					if (!draft.objectivesSummary)
-						throw new Error("Seeder final response missing objectivesSummary");
-					if (!draft.constraintsSummary)
-						throw new Error("Seeder final response missing constraintsSummary");
-					if (!draft.principlesGuidelinesSummary)
-						throw new Error(
-							"Seeder final response missing principlesGuidelinesSummary",
-						);
-					if (!draft.implementationStatusSummary)
-						throw new Error(
-							"Seeder final response missing implementationStatusSummary",
-						);
-					if (draft.keyFiles.length === 0)
-						throw new Error("Seeder final response produced no keyFiles");
-					const validation = validateSeedCoverage(draft);
+					const validation = validateFinalSeedDraft(draft);
+					if (!validation.ok && !validation.retryable) {
+						throw new Error(validation.reason);
+					}
 					if (validation.ok) {
 						this.logger?.info("seeder.run.completed", {
 							runId,
@@ -638,26 +680,12 @@ export class PiModelClient implements ModelClient {
 			const forcedDraft = coerceSeedDraft(
 				parseSeederFinalResponse(forcedResponseText.text),
 			);
-			if (!forcedDraft.projectIntentSummary)
-				throw new Error("Seeder final response missing projectIntentSummary");
-			if (!forcedDraft.objectivesSummary)
-				throw new Error("Seeder final response missing objectivesSummary");
-			if (!forcedDraft.constraintsSummary)
-				throw new Error("Seeder final response missing constraintsSummary");
-			if (!forcedDraft.principlesGuidelinesSummary)
-				throw new Error(
-					"Seeder final response missing principlesGuidelinesSummary",
-				);
-			if (!forcedDraft.implementationStatusSummary)
-				throw new Error(
-					"Seeder final response missing implementationStatusSummary",
-				);
-			if (forcedDraft.keyFiles.length === 0)
-				throw new Error("Seeder final response produced no keyFiles");
-			const forcedValidation = validateSeedCoverage(forcedDraft);
+			const forcedValidation = validateFinalSeedDraft(forcedDraft);
 			if (!forcedValidation.ok) {
 				throw new Error(
-					`Forced seeder final synthesis failed validation: ${forcedValidation.reason}`,
+					forcedValidation.retryable
+						? `Forced seeder final synthesis failed validation: ${forcedValidation.reason}`
+						: forcedValidation.reason,
 				);
 			}
 			this.logger?.info("seeder.run.completed", {

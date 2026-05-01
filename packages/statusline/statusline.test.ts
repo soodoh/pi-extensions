@@ -3,7 +3,7 @@ import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { describe, expect, test, vi } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import statusline from "./index";
 
 const execFileAsync = promisify(execFile);
@@ -63,6 +63,11 @@ function createPi() {
 	};
 }
 
+afterEach(() => {
+	vi.unstubAllEnvs();
+	vi.unstubAllGlobals();
+});
+
 describe("statusline extension", () => {
 	test("registers a below-editor widget and renders model/context smoke output", () => {
 		let widgetFactory: WidgetFactory | undefined;
@@ -119,7 +124,48 @@ describe("statusline extension", () => {
 		expect(line).toContain("25.0%/1.0k");
 	});
 
-	test("uses stored GitHub Copilot access credential for OAuth usage", async () => {
+	test("skips provider usage network egress by default", async () => {
+		const fetchMock = vi.fn(async () => Response.json({}));
+		vi.stubGlobal("fetch", fetchMock);
+		let widgetFactory: WidgetFactory | undefined;
+		const pi = createPi();
+		statusline(pi);
+		const ctx: StatuslineContext = {
+			hasUI: true,
+			ui: {
+				setFooter() {},
+				setWidget(_key, factory) {
+					widgetFactory = factory;
+				},
+			},
+			model: { id: "copilot", provider: "github-copilot" },
+			modelRegistry: {
+				getAvailable() {
+					return [];
+				},
+				async getApiKeyForProvider() {
+					throw new Error("provider token should not be read");
+				},
+				isUsingOAuth() {
+					return true;
+				},
+			},
+			sessionManager: { getBranch: () => [] },
+			settingsManager: { getCompactionSettings: () => ({ enabled: true }) },
+			getContextUsage: () => ({ tokens: 0, contextWindow: 1000, percent: 0 }),
+		};
+
+		pi.handlers.get("session_start")?.({}, ctx);
+		widgetFactory?.({}, { fg: (_color, text) => text }).render(120);
+		pi.handlers.get("agent_end")?.({}, ctx);
+		pi.handlers.get("after_provider_response")?.({}, ctx);
+
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		expect(fetchMock).not.toHaveBeenCalled();
+	});
+
+	test("uses stored GitHub Copilot access credential for OAuth usage when enabled", async () => {
+		vi.stubEnv("PI_STATUSLINE_PROVIDER_USAGE", "1");
 		const fetchCalls: RequestInit[] = [];
 		const fetchMock = vi.fn(
 			async (_url: string | URL | Request, init?: RequestInit) => {

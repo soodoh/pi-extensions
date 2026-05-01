@@ -6,11 +6,6 @@ import {
 	type GhostSuggestionDecoratorOptions,
 } from "./ghost-suggestion-decorator";
 
-export interface GhostEditorInstallState {
-	context: object;
-	sessionFile: string | null;
-}
-
 interface GhostEditorDecoratorRuntimeOptions {
 	getSuggestion: () => string | undefined;
 	getSuggestionRevision: () => number;
@@ -109,14 +104,11 @@ function ensureRuntime(ctx: GhostEditorContext): GhostDecoratorRuntime {
 }
 
 export function syncGhostEditorDecorator(params: {
-	state: GhostEditorInstallState | undefined;
 	context: GhostEditorContext;
-	sessionFile: string | null;
 	options: GhostEditorDecoratorRuntimeOptions;
-}): GhostEditorInstallState | undefined {
+}): void {
 	const runtime = ensureRuntime(params.context);
 	runtime.setOptions(params.options);
 	runtime.activate();
 	runtime.ensureDefaultEditorInstalled(params.context);
-	return { context: params.context, sessionFile: params.sessionFile };
 }

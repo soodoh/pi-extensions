@@ -6,6 +6,19 @@ import type { VcsClient } from "../../app/ports/vcs-client";
 const execFileAsync = promisify(execFile);
 const GIT_TIMEOUT_MS = 10_000;
 
+function parsePorcelainStatus(output: string): string[] {
+	const paths: string[] = [];
+	const records = output.split("\0").filter(Boolean);
+	for (let index = 0; index < records.length; index += 1) {
+		const record = records[index];
+		if (record.length < 4) continue;
+		paths.push(path.normalize(record.slice(3)));
+		const status = record.slice(0, 2);
+		if (status.includes("R") || status.includes("C")) index += 1;
+	}
+	return paths;
+}
+
 export class GitClient implements VcsClient {
 	public constructor(private readonly cwd: string = process.cwd()) {}
 
@@ -44,13 +57,8 @@ export class GitClient implements VcsClient {
 	}
 
 	public async getWorkingTreeStatus(): Promise<string[]> {
-		const result = await this.runGit(["status", "--porcelain"]);
-		if (!result) return [];
-		return result
-			.split("\n")
-			.map((line) => line.trim())
-			.filter(Boolean)
-			.map((line) => path.normalize(line.slice(3)));
+		const result = await this.runGit(["status", "--porcelain=v1", "-z"]);
+		return result ? parsePorcelainStatus(result) : [];
 	}
 
 	private async runGit(args: string[]): Promise<string | null> {

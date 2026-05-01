@@ -316,9 +316,7 @@ export class WorkflowRunner {
 		if (!run.planPath) throw new Error(`Workflow run ${runId} has no planPath`);
 		const full = await ensureRealPathInsideCwd(run.cwd, run.planPath);
 		const content = await this.approvedPlanContent(run, full);
-		run.phase = "executing";
 		if (!run.planContentHash) run.planContentHash = sha256(content);
-		await saveRun(run);
 		const workflow = await this.findWorkflow(run.cwd, run.workflowName);
 		if (!workflow)
 			throw new Error(`Unknown workflow for run ${runId}: ${run.workflowName}`);
@@ -335,6 +333,7 @@ export class WorkflowRunner {
 		);
 		await saveRun(run);
 		const sessionName = `workflow: ${run.workflowName} execution ${run.id}`;
+		let executionSessionPath: string | undefined;
 		await ctx.newSession({
 			parentSession: ctx.sessionManager?.getSessionFile?.(),
 			setup: async (sm) => {
@@ -351,11 +350,20 @@ export class WorkflowRunner {
 				});
 			},
 			withSession: async (newCtx) => {
-				run.executionSessionPath = newCtx.sessionManager?.getSessionFile?.();
-				await saveRun(run);
+				executionSessionPath = newCtx.sessionManager
+					?.getSessionFile?.()
+					?.trim();
+				if (!executionSessionPath) {
+					throw new Error(
+						`Workflow run ${runId} execution session did not provide a session file; refusing to mark the run executing.`,
+					);
+				}
 				await newCtx.sendUserMessage(kickoff);
 			},
 		});
+		run.phase = "executing";
+		run.executionSessionPath = executionSessionPath;
+		await saveRun(run);
 	}
 	async completeRun(
 		runId: string,

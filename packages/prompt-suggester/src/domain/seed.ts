@@ -89,6 +89,89 @@ export interface ReseedTrigger {
 	gitDiffSummary?: string;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isStringArray(value: unknown): value is string[] {
+	return (
+		Array.isArray(value) && value.every((entry) => typeof entry === "string")
+	);
+}
+
+function isSeedKeyFileCategory(value: unknown): value is SeedKeyFileCategory {
+	return (
+		value === "vision" ||
+		value === "architecture" ||
+		value === "principles_guidelines" ||
+		value === "code_entrypoint" ||
+		value === "other"
+	);
+}
+
+function isSeedKeyFile(value: unknown): value is SeedKeyFile {
+	if (!isRecord(value)) return false;
+	return (
+		typeof value.path === "string" &&
+		typeof value.hash === "string" &&
+		typeof value.whyImportant === "string" &&
+		isSeedKeyFileCategory(value.category)
+	);
+}
+
+function isSeedCategoryFinding(value: unknown): value is SeedCategoryFinding {
+	if (!isRecord(value)) return false;
+	return (
+		typeof value.found === "boolean" &&
+		typeof value.rationale === "string" &&
+		isStringArray(value.files)
+	);
+}
+
+function isSeedCategoryFindings(value: unknown): value is SeedCategoryFindings {
+	if (!isRecord(value)) return false;
+	return REQUIRED_SEED_CATEGORIES.every((category) =>
+		isSeedCategoryFinding(value[category]),
+	);
+}
+
+export function isSeedArtifact(value: unknown): value is SeedArtifact {
+	if (!isRecord(value)) return false;
+	return (
+		typeof value.seedVersion === "number" &&
+		typeof value.generatedAt === "string" &&
+		(value.sourceCommit === undefined ||
+			typeof value.sourceCommit === "string") &&
+		typeof value.generatorVersion === "string" &&
+		typeof value.seederPromptVersion === "string" &&
+		typeof value.suggestionPromptVersion === "string" &&
+		typeof value.configFingerprint === "string" &&
+		(value.modelId === undefined || typeof value.modelId === "string") &&
+		typeof value.projectIntentSummary === "string" &&
+		typeof value.objectivesSummary === "string" &&
+		typeof value.constraintsSummary === "string" &&
+		typeof value.principlesGuidelinesSummary === "string" &&
+		typeof value.implementationStatusSummary === "string" &&
+		isStringArray(value.topObjectives) &&
+		isStringArray(value.constraints) &&
+		Array.isArray(value.keyFiles) &&
+		value.keyFiles.every(isSeedKeyFile) &&
+		(value.categoryFindings === undefined ||
+			isSeedCategoryFindings(value.categoryFindings)) &&
+		isStringArray(value.openQuestions) &&
+		(value.reseedNotes === undefined ||
+			typeof value.reseedNotes === "string") &&
+		(value.lastReseedReason === undefined ||
+			value.lastReseedReason === "initial_missing" ||
+			value.lastReseedReason === "manual" ||
+			value.lastReseedReason === "key_file_changed" ||
+			value.lastReseedReason === "config_changed" ||
+			value.lastReseedReason === "generator_changed") &&
+		(value.lastChangedFiles === undefined ||
+			isStringArray(value.lastChangedFiles))
+	);
+}
+
 export interface StalenessCheckResult {
 	stale: boolean;
 	trigger?: ReseedTrigger;

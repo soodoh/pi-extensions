@@ -164,6 +164,9 @@ nodes:
 			async newSession(options) {
 				await options.withSession({
 					...ctx,
+					sessionManager: {
+						getSessionFile: () => join(cwd, "execution-session.json"),
+					},
 					async sendUserMessage(message) {
 						kickoff = message;
 					},
@@ -219,6 +222,9 @@ nodes:
 				});
 				await options.withSession({
 					...ctx,
+					sessionManager: {
+						getSessionFile: () => join(cwd, "session.json"),
+					},
 					async sendUserMessage(message) {
 						kickoff = message;
 					},
@@ -305,5 +311,88 @@ nodes:
 		await expect(
 			runner.continueExecution("pwf-44444444", workflowCtx(cwd)),
 		).rejects.toThrow(/refusing to create a duplicate session/);
+	});
+
+	test("continueExecution leaves approved runs approved when no execution session file is created", async () => {
+		const home = await tempDir("pi-workflows-runner-no-session-home");
+		const cwd = await tempDir("pi-workflows-runner-no-session-cwd");
+		const planPath = join(cwd, "plan.md");
+		await writeFile(planPath, "# Plan\n\n- [ ] Update one file\n", "utf8");
+		const { WorkflowRunner } = await importRunnerWithHome(home);
+		const { getRun, saveRun } = await import("../src/store");
+		await saveRun({
+			...runRecord("pwf-55555555", cwd, "approved"),
+			planPath: "plan.md",
+		});
+		const runner = new WorkflowRunner(
+			{
+				events: {
+					emit: () => {},
+					on: () => undefined,
+				},
+			},
+			pathToFileURL(new URL("../index.ts", import.meta.url).pathname).href,
+		);
+		const ctx: WorkflowContext = {
+			cwd,
+			async sendUserMessage() {},
+			async newSession(options) {
+				await options.withSession({
+					...workflowCtx(cwd),
+				});
+			},
+		};
+
+		await expect(runner.continueExecution("pwf-55555555", ctx)).rejects.toThrow(
+			/did not provide a session file/,
+		);
+		expect((await getRun("pwf-55555555"))?.phase).toBe("approved");
+		expect(
+			(await getRun("pwf-55555555"))?.executionSessionPath,
+		).toBeUndefined();
+	});
+
+	test("continueExecution leaves approved runs approved when kickoff send fails", async () => {
+		const home = await tempDir("pi-workflows-runner-send-fail-home");
+		const cwd = await tempDir("pi-workflows-runner-send-fail-cwd");
+		await writeFile(
+			join(cwd, "plan.md"),
+			"# Plan\n\n- [ ] Update one file\n",
+			"utf8",
+		);
+		const { WorkflowRunner } = await importRunnerWithHome(home);
+		const { getRun, saveRun } = await import("../src/store");
+		await saveRun({
+			...runRecord("pwf-66666666", cwd, "approved"),
+			planPath: "plan.md",
+		});
+		const runner = new WorkflowRunner(
+			{
+				events: {
+					emit: () => {},
+					on: () => undefined,
+				},
+			},
+			pathToFileURL(new URL("../index.ts", import.meta.url).pathname).href,
+		);
+		const ctx: WorkflowContext = {
+			cwd,
+			async sendUserMessage() {},
+			async newSession(options) {
+				await options.withSession({
+					...workflowCtx(cwd, join(cwd, "execution-session.json")),
+					async sendUserMessage() {
+						throw new Error("send failed");
+					},
+				});
+			},
+		};
+
+		await expect(runner.continueExecution("pwf-66666666", ctx)).rejects.toThrow(
+			/send failed/,
+		);
+		const saved = await getRun("pwf-66666666");
+		expect(saved?.phase).toBe("approved");
+		expect(saved?.executionSessionPath).toBeUndefined();
 	});
 });

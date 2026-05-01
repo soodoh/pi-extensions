@@ -61,6 +61,43 @@ test("accumulateUsage combines multiple usage objects", () => {
 	);
 });
 
+test("usage accumulation sanitizes non-finite and negative values", () => {
+	const malformed = {
+		inputTokens: Number.NaN,
+		outputTokens: Number.POSITIVE_INFINITY,
+		cacheReadTokens: -1,
+		cacheWriteTokens: 4,
+		totalTokens: Number.NEGATIVE_INFINITY,
+		costTotal: -0.01,
+	};
+
+	expect(addUsageStats(emptyUsageStats(), malformed)).toMatchObject({
+		calls: 1,
+		inputTokens: 0,
+		outputTokens: 0,
+		cacheReadTokens: 0,
+		cacheWriteTokens: 4,
+		totalTokens: 0,
+		costTotal: 0,
+		last: {
+			inputTokens: 0,
+			outputTokens: 0,
+			cacheReadTokens: 0,
+			cacheWriteTokens: 4,
+			totalTokens: 0,
+			costTotal: 0,
+		},
+	});
+	expect(accumulateUsage(createEmptyUsage(), malformed)).toEqual({
+		inputTokens: 0,
+		outputTokens: 0,
+		cacheReadTokens: 0,
+		cacheWriteTokens: 4,
+		totalTokens: 0,
+		costTotal: 0,
+	});
+});
+
 test("normalizeUsageStats falls back to zeros for missing data", () => {
 	expect(normalizeUsageStats(undefined)).toEqual({
 		...emptyUsageStats(),

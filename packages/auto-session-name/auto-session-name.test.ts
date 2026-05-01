@@ -149,6 +149,34 @@ describe("skill-started session naming", () => {
 		}
 	});
 
+	test("backfill ignores malformed entries before a valid user message", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "pi-session-name-test-"));
+		try {
+			const sessionPath = join(dir, "session.jsonl");
+			await writeFile(
+				sessionPath,
+				[
+					jsonLine(null),
+					jsonLine({ type: "message", message: null }),
+					jsonLine({ type: "message", message: { role: "assistant" } }),
+					jsonLine({
+						type: "message",
+						id: "aaaaaaaa",
+						message: { role: "user", content: otherSkillPrefixedPrompt },
+					}),
+				].join(""),
+			);
+
+			expect(await backfillSkillSessionNameInFile(sessionPath)).toBe(true);
+			const updated = await readFile(sessionPath, "utf8");
+			expect(updated).toContain(
+				'"name":"systematic-debugging: Find the root cause before fixing this issue."',
+			);
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+
 	test("skips historical backfill files over the bounded byte cap", async () => {
 		const dir = await mkdtemp(join(tmpdir(), "pi-session-name-test-"));
 		try {

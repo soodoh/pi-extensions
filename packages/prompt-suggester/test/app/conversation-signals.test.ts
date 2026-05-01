@@ -3,24 +3,28 @@ import { buildTurnContext } from "../../src/app/services/conversation-signals";
 
 describe("conversation signal extraction", () => {
 	test("malformed assistant tool call arguments do not throw", () => {
-		const messages = JSON.parse(`[
+		const messages: unknown[] = [
 			{
-				"role": "user",
-				"content": "Inspect the project",
-				"timestamp": 1
+				role: "user",
+				content: "Inspect the project",
+				timestamp: 1,
 			},
 			{
-				"role": "assistant",
-				"content": [
-					{ "type": "toolCall", "name": "read", "arguments": "not an object" },
-					{ "type": "toolCall", "name": "edit", "arguments": null },
-					{ "type": "toolCall", "name": "glob" },
-					{ "type": "toolCall", "name": "bash", "arguments": { "command": "bun test" } },
-					{ "type": "text", "text": "Done" }
+				role: "assistant",
+				content: [
+					{ type: "toolCall", name: "read", arguments: "not an object" },
+					{ type: "toolCall", name: "edit", arguments: null },
+					{ type: "toolCall", name: "glob" },
+					{
+						type: "toolCall",
+						name: "bash",
+						arguments: { command: "bun test" },
+					},
+					{ type: "text", text: "Done" },
 				],
-				"timestamp": 2
-			}
-		]`);
+				timestamp: 2,
+			},
+		];
 
 		const context = buildTurnContext({
 			turnId: "turn-1",
@@ -37,5 +41,45 @@ describe("conversation signal extraction", () => {
 			"bash(bun test)",
 		]);
 		expect(context?.touchedFiles).toEqual([]);
+	});
+
+	test("assistant usage extraction sanitizes malformed values", () => {
+		const messages: unknown[] = [
+			{
+				role: "user",
+				content: "Inspect the project",
+				timestamp: 1,
+			},
+			{
+				role: "assistant",
+				content: [{ type: "text", text: "Done" }],
+				timestamp: 2,
+				usage: {
+					input: Number.NaN,
+					output: Number.POSITIVE_INFINITY,
+					cacheRead: -1,
+					cacheWrite: 3,
+					totalTokens: Number.NEGATIVE_INFINITY,
+					cost: { total: -0.2 },
+				},
+			},
+		];
+
+		const context = buildTurnContext({
+			turnId: "turn-1",
+			sourceLeafId: "leaf-1",
+			messagesFromPrompt: messages,
+			branchMessages: messages,
+			occurredAt: "2026-05-01T00:00:00.000Z",
+		});
+
+		expect(context?.assistantUsage).toEqual({
+			inputTokens: 0,
+			outputTokens: 0,
+			cacheReadTokens: 0,
+			cacheWriteTokens: 3,
+			totalTokens: 0,
+			costTotal: 0,
+		});
 	});
 });

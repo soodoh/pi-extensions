@@ -40,26 +40,28 @@ export class SessionUsageLedger {
 	): Promise<void> {
 		const usageKey = context.usageFile;
 		const existingTask = this.usageTasks.get(usageKey) ?? Promise.resolve();
-		const task = existingTask.then(async () => {
-			const current = await this.load(context);
-			const next = {
-				suggester:
-					kind === "suggester"
-						? addUsageStats(current.suggester, usage)
-						: current.suggester,
-				seeder:
-					kind === "seeder"
-						? addUsageStats(current.seeder, usage)
-						: current.seeder,
-			};
-			await ensurePrivateDirectory(path.dirname(usageKey));
-			await atomicWriteJson(usageKey, {
-				schemaVersion: STORE_SCHEMA_VERSION,
-				suggestionUsage: next.suggester,
-				seederUsage: next.seeder,
-				updatedAt: new Date().toISOString(),
-			} satisfies PersistedUsageState);
-		});
+		const task = existingTask
+			.catch(() => undefined)
+			.then(async () => {
+				const current = await this.load(context);
+				const next = {
+					suggester:
+						kind === "suggester"
+							? addUsageStats(current.suggester, usage)
+							: current.suggester,
+					seeder:
+						kind === "seeder"
+							? addUsageStats(current.seeder, usage)
+							: current.seeder,
+				};
+				await ensurePrivateDirectory(path.dirname(usageKey));
+				await atomicWriteJson(usageKey, {
+					schemaVersion: STORE_SCHEMA_VERSION,
+					suggestionUsage: next.suggester,
+					seederUsage: next.seeder,
+					updatedAt: new Date().toISOString(),
+				} satisfies PersistedUsageState);
+			});
 		const trackedTask = task.finally(() => {
 			if (this.usageTasks.get(usageKey) === trackedTask)
 				this.usageTasks.delete(usageKey);

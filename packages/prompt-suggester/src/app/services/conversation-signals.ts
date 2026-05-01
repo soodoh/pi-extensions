@@ -4,6 +4,7 @@ import type {
 	TurnContext,
 	TurnStatus,
 } from "../../domain/suggestion";
+import { normalizeFiniteNonNegativeNumber } from "../../domain/usage";
 
 interface BranchMessageEntry {
 	id: string;
@@ -32,6 +33,15 @@ function textFromContent(content: unknown): string {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isAgentMessage(value: unknown): value is AgentMessage {
+	if (!isRecord(value)) return false;
+	return (
+		value.role === "user" ||
+		value.role === "assistant" ||
+		value.role === "toolResult"
+	);
 }
 
 function extractToolSignals(messages: AgentMessage[]): {
@@ -89,12 +99,12 @@ function extractUsage(message: AgentMessage): SuggestionUsage | undefined {
 		| undefined;
 	if (!usage) return undefined;
 	return {
-		inputTokens: Number(usage.input ?? 0),
-		outputTokens: Number(usage.output ?? 0),
-		cacheReadTokens: Number(usage.cacheRead ?? 0),
-		cacheWriteTokens: Number(usage.cacheWrite ?? 0),
-		totalTokens: Number(usage.totalTokens ?? 0),
-		costTotal: Number(usage.cost?.total ?? 0),
+		inputTokens: normalizeFiniteNonNegativeNumber(usage.input),
+		outputTokens: normalizeFiniteNonNegativeNumber(usage.output),
+		cacheReadTokens: normalizeFiniteNonNegativeNumber(usage.cacheRead),
+		cacheWriteTokens: normalizeFiniteNonNegativeNumber(usage.cacheWrite),
+		totalTokens: normalizeFiniteNonNegativeNumber(usage.totalTokens),
+		costTotal: normalizeFiniteNonNegativeNumber(usage.cost?.total),
 	};
 }
 
@@ -161,14 +171,20 @@ function buildPlaceholderTurnContext(params: {
 export function buildTurnContext(params: {
 	turnId: string;
 	sourceLeafId: string;
-	messagesFromPrompt: AgentMessage[];
-	branchMessages: AgentMessage[];
+	messagesFromPrompt: unknown[];
+	branchMessages: unknown[];
 	occurredAt: string;
 }): TurnContext | null {
-	const latestMessage = params.messagesFromPrompt.at(-1);
+	const messagesFromPrompt = params.messagesFromPrompt.filter(isAgentMessage);
+	const branchMessages = params.branchMessages.filter(isAgentMessage);
+	const latestMessage = messagesFromPrompt.at(-1);
 	if (!latestMessage) return null;
 	if (latestMessage.role !== "assistant") {
-		return buildPlaceholderTurnContext(params);
+		return buildPlaceholderTurnContext({
+			...params,
+			messagesFromPrompt,
+			branchMessages,
+		});
 	}
 
 	const assistantText = textFromContent(latestMessage.content);
@@ -178,10 +194,8 @@ export function buildTurnContext(params: {
 			: latestMessage.stopReason === "aborted"
 				? "aborted"
 				: "success";
-	const recentUserPrompts = extractRecentUserPrompts(params.branchMessages);
-	const { toolSignals, touchedFiles } = extractToolSignals(
-		params.messagesFromPrompt,
-	);
+	const recentUserPrompts = extractRecentUserPrompts(branchMessages);
+	const { toolSignals, touchedFiles } = extractToolSignals(messagesFromPrompt);
 	return {
 		turnId: params.turnId,
 		sourceLeafId: params.sourceLeafId,

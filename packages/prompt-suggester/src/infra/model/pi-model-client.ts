@@ -26,7 +26,11 @@ import {
 	type SeedKeyFileCategory,
 } from "../../domain/seed";
 import type { SuggestionUsage } from "../../domain/suggestion";
-import { accumulateUsage, createEmptyUsage } from "../../domain/usage";
+import {
+	accumulateUsage,
+	createEmptyUsage,
+	normalizeFiniteNonNegativeNumber,
+} from "../../domain/usage";
 import {
 	renderForcedSeederFinalPrompt,
 	renderSeederSystemPrompt,
@@ -37,6 +41,12 @@ import { renderTranscriptSteeringPrompt } from "../../prompts/transcript-steerin
 
 const execFileAsync = promisify(execFile);
 const GREP_TIMEOUT_MS = 10_000;
+const SEEDER_READ_MAX_FILE_BYTES = 256 * 1024;
+const SEEDER_READ_MAX_LINE_CHARS = 2000;
+const SEEDER_FIND_MAX_FILES = 5000;
+const SEEDER_FIND_MAX_DIRECTORIES = 1000;
+const SEEDER_FIND_MAX_DEPTH = 12;
+const SEEDER_FIND_MAX_ELAPSED_MS = 2000;
 const IGNORED_DIRS = new Set([
 	".git",
 	"node_modules",
@@ -843,12 +853,20 @@ export class PiModelClient implements ModelClient {
 		return {
 			text,
 			usage: {
-				inputTokens: Number(response.usage?.input ?? 0),
-				outputTokens: Number(response.usage?.output ?? 0),
-				cacheReadTokens: Number(response.usage?.cacheRead ?? 0),
-				cacheWriteTokens: Number(response.usage?.cacheWrite ?? 0),
-				totalTokens: Number(response.usage?.totalTokens ?? 0),
-				costTotal: Number(response.usage?.cost?.total ?? 0),
+				inputTokens: normalizeFiniteNonNegativeNumber(response.usage?.input),
+				outputTokens: normalizeFiniteNonNegativeNumber(response.usage?.output),
+				cacheReadTokens: normalizeFiniteNonNegativeNumber(
+					response.usage?.cacheRead,
+				),
+				cacheWriteTokens: normalizeFiniteNonNegativeNumber(
+					response.usage?.cacheWrite,
+				),
+				totalTokens: normalizeFiniteNonNegativeNumber(
+					response.usage?.totalTokens,
+				),
+				costTotal: normalizeFiniteNonNegativeNumber(
+					response.usage?.cost?.total,
+				),
 			},
 		};
 	}
@@ -1071,31 +1089,79 @@ export class PiModelClient implements ModelClient {
 		const realRoot = await this.realCwd();
 		const pattern = String(args.pattern ?? "").trim();
 		if (!pattern) throw new Error("find requires pattern");
-		const limit = Math.min(500, Math.max(1, Number(args.limit ?? 200)));
+		const limit = this.parsePositiveInteger(args.limit, 200, 500);
 		const matcher = globToRegExp(
 			pattern.includes("*") || pattern.includes("?")
 				? pattern
 				: `**/*${pattern}*`,
 		);
 		const results: string[] = [];
+		const pending = [{ dir: absolute, depth: 0 }];
+		const deadline = Date.now() + SEEDER_FIND_MAX_ELAPSED_MS;
+		let visitedFiles = 0;
+		let visitedDirectories = 0;
+		let truncatedReason: string | undefined;
 
-		const walk = async (dir: string): Promise<void> => {
-			if (results.length >= limit) return;
-			const entries = await fs.readdir(dir, { withFileTypes: true });
+		while (pending.length > 0 && !truncatedReason) {
+			if (Date.now() > deadline) {
+				truncatedReason = `elapsed ${SEEDER_FIND_MAX_ELAPSED_MS}ms cap reached`;
+				break;
+			}
+			if (results.length >= limit) {
+				truncatedReason = `result limit ${limit} reached`;
+				break;
+			}
+			if (visitedDirectories >= SEEDER_FIND_MAX_DIRECTORIES) {
+				truncatedReason = `directory scan cap ${SEEDER_FIND_MAX_DIRECTORIES} reached`;
+				break;
+			}
+
+			const current = pending.shift();
+			if (!current) break;
+			visitedDirectories += 1;
+			const entries = await fs.readdir(current.dir, { withFileTypes: true });
 			for (const entry of entries) {
-				if (results.length >= limit) break;
+				if (Date.now() > deadline) {
+					truncatedReason = `elapsed ${SEEDER_FIND_MAX_ELAPSED_MS}ms cap reached`;
+					break;
+				}
+				if (results.length >= limit) {
+					truncatedReason = `result limit ${limit} reached`;
+					break;
+				}
+				const fullPath = path.join(current.dir, entry.name);
 				if (entry.isDirectory()) {
 					if (shouldIgnoreSeederDir(entry.name)) continue;
-					await walk(path.join(dir, entry.name));
+					if (current.depth >= SEEDER_FIND_MAX_DEPTH) {
+						truncatedReason = `depth cap ${SEEDER_FIND_MAX_DEPTH} reached`;
+						break;
+					}
+					if (
+						visitedDirectories + pending.length >=
+						SEEDER_FIND_MAX_DIRECTORIES
+					) {
+						truncatedReason = `directory scan cap ${SEEDER_FIND_MAX_DIRECTORIES} reached`;
+						break;
+					}
+					pending.push({ dir: fullPath, depth: current.depth + 1 });
 					continue;
 				}
-				const rel = path.relative(realRoot, path.join(dir, entry.name));
+				if (!entry.isFile()) continue;
+				visitedFiles += 1;
+				if (visitedFiles > SEEDER_FIND_MAX_FILES) {
+					truncatedReason = `file scan cap ${SEEDER_FIND_MAX_FILES} reached`;
+					break;
+				}
+				const rel = path.relative(realRoot, fullPath);
 				if (matcher.test(rel.replaceAll("\\", "/"))) results.push(rel);
 			}
-		};
+		}
 
-		await walk(absolute);
-		return truncate(results.join("\n") || "(no matches)", 8000);
+		const body = results.join("\n") || "(no matches)";
+		const diagnostic = truncatedReason
+			? `\n[find truncated: ${truncatedReason}; scanned ${visitedFiles} files and ${visitedDirectories} directories]`
+			: "";
+		return truncate(`${body}${diagnostic}`, 8000);
 	}
 
 	private async toolGrep(args: Record<string, unknown>): Promise<string> {
@@ -1161,10 +1227,16 @@ export class PiModelClient implements ModelClient {
 
 	private async toolRead(args: Record<string, unknown>): Promise<string> {
 		const absolute = await this.resolvePath(args.path);
+		const metadata = await fs.stat(absolute);
+		if (!metadata.isFile()) return "[read skipped: path is not a file]";
+		if (metadata.size > SEEDER_READ_MAX_FILE_BYTES) {
+			return `[read truncated: file is ${metadata.size} bytes; max ${SEEDER_READ_MAX_FILE_BYTES} bytes. Narrow the path or use grep/find first.]`;
+		}
 		const offset = this.parsePositiveInteger(args.offset, 1);
 		const limit = this.parsePositiveInteger(args.limit, 220, 1200);
 		const numbered: string[] = [];
 		let lineNumber = 0;
+		let truncatedLineCount = 0;
 		const stream = createReadStream(absolute, { encoding: "utf8" });
 		const lines = createInterface({
 			input: stream,
@@ -1175,7 +1247,12 @@ export class PiModelClient implements ModelClient {
 			for await (const line of lines) {
 				lineNumber += 1;
 				if (lineNumber < offset) continue;
-				numbered.push(`${lineNumber}: ${line}`);
+				const boundedLine =
+					line.length > SEEDER_READ_MAX_LINE_CHARS
+						? `[line truncated at ${SEEDER_READ_MAX_LINE_CHARS} chars] ${line.slice(0, SEEDER_READ_MAX_LINE_CHARS)}`
+						: line;
+				if (boundedLine !== line) truncatedLineCount += 1;
+				numbered.push(`${lineNumber}: ${boundedLine}`);
 				if (numbered.length >= limit) {
 					lines.close();
 					stream.destroy();
@@ -1187,6 +1264,10 @@ export class PiModelClient implements ModelClient {
 			stream.destroy();
 		}
 
-		return truncate(numbered.join("\n") || "(empty)", 12000);
+		const diagnostic =
+			truncatedLineCount > 0
+				? `\n[read truncated ${truncatedLineCount} overlong line(s) at ${SEEDER_READ_MAX_LINE_CHARS} chars]`
+				: "";
+		return truncate(`${numbered.join("\n") || "(empty)"}${diagnostic}`, 12000);
 	}
 }

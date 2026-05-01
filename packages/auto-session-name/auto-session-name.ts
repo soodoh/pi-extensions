@@ -25,14 +25,6 @@ type ExtensionContext = {
 	};
 };
 
-type SessionEntry = {
-	type: string;
-	message?: {
-		role?: string;
-		content?: unknown;
-	};
-};
-
 type ShouldNameAfterTurnInput = {
 	hasSessionName: boolean;
 	skillName?: string;
@@ -99,6 +91,12 @@ export const shouldNameAfterTurn = ({
 	return !hasSessionName && Boolean(skillName) && turnIndex === 0;
 };
 
+const isRecord = (value: unknown): value is Record<PropertyKey, unknown> =>
+	typeof value === "object" && value !== null;
+
+const isTextPart = (part: unknown): part is { text: string } =>
+	isRecord(part) && part.type === "text" && typeof part.text === "string";
+
 const extractTextContent = (content: unknown): string => {
 	if (typeof content === "string") {
 		return content;
@@ -109,14 +107,7 @@ const extractTextContent = (content: unknown): string => {
 	}
 
 	return content
-		.filter((part): part is { type: string; text: string } => {
-			return (
-				Boolean(part) &&
-				typeof part === "object" &&
-				(part as { type?: unknown }).type === "text" &&
-				typeof (part as { text?: unknown }).text === "string"
-			);
-		})
+		.filter(isTextPart)
 		.map((part) => part.text)
 		.join("\n");
 };
@@ -124,14 +115,13 @@ const extractTextContent = (content: unknown): string => {
 const getLatestSessionName = (entries: unknown[]): string | undefined => {
 	for (let index = entries.length - 1; index >= 0; index--) {
 		const entry = entries[index];
-		if (!entry || typeof entry !== "object") {
+		if (!isRecord(entry)) {
 			continue;
 		}
 
-		const maybeInfo = entry as { type?: unknown; name?: unknown };
-		if (maybeInfo.type === SESSION_INFO_TYPE) {
-			return typeof maybeInfo.name === "string"
-				? maybeInfo.name.trim() || undefined
+		if (entry.type === SESSION_INFO_TYPE) {
+			return typeof entry.name === "string"
+				? entry.name.trim() || undefined
 				: undefined;
 		}
 	}
@@ -140,12 +130,11 @@ const getLatestSessionName = (entries: unknown[]): string | undefined => {
 };
 
 const getEntryId = (entry: unknown): string | null => {
-	if (!entry || typeof entry !== "object") {
+	if (!isRecord(entry)) {
 		return null;
 	}
 
-	const id = (entry as { id?: unknown }).id;
-	return typeof id === "string" ? id : null;
+	return typeof entry.id === "string" ? entry.id : null;
 };
 
 const makeEntryId = (entries: unknown[]): string => {
@@ -168,21 +157,19 @@ const parseJsonlEntries = (content: string): unknown[] => {
 		.split("\n")
 		.map((line) => line.trim())
 		.filter(Boolean)
-		.map((line) => JSON.parse(line) as unknown);
+		.map((line) => JSON.parse(line));
 };
 
-const getFirstUserMessageText = (
-	entries: SessionEntry[],
-): string | undefined => {
-	const firstUserEntry = entries.find(
-		(entry) => entry.type === "message" && entry.message?.role === "user",
-	);
-	if (!firstUserEntry) {
-		return undefined;
+const getFirstUserMessageText = (entries: unknown[]): string | undefined => {
+	for (const entry of entries) {
+		if (!isRecord(entry) || entry.type !== "message") continue;
+		const message = entry.message;
+		if (!isRecord(message) || message.role !== "user") continue;
+		const text = extractTextContent(message.content).trim();
+		if (text) return text;
 	}
 
-	const text = extractTextContent(firstUserEntry.message?.content).trim();
-	return text || undefined;
+	return undefined;
 };
 
 export const backfillSkillSessionNameInFile = async (
@@ -197,7 +184,7 @@ export const backfillSkillSessionNameInFile = async (
 		return false;
 	}
 
-	const firstUserText = getFirstUserMessageText(entries as SessionEntry[]);
+	const firstUserText = getFirstUserMessageText(entries);
 	if (!firstUserText) {
 		return false;
 	}
@@ -310,7 +297,7 @@ function scheduleHistoricalBackfill(): void {
 
 const maybeNameSkillSession = (
 	pi: ExtensionAPI,
-	entries: SessionEntry[],
+	entries: unknown[],
 ): boolean => {
 	if (pi.getSessionName()) {
 		return false;
@@ -335,7 +322,7 @@ const maybeNameSkillSession = (
 export default function (pi: ExtensionAPI) {
 	pi.on("turn_end", async (event, ctx) => {
 		const firstUserText = getFirstUserMessageText(
-			ctx.sessionManager.getBranch() as SessionEntry[],
+			ctx.sessionManager.getBranch(),
 		);
 		const skillName = firstUserText
 			? extractSkillName(firstUserText)
@@ -360,7 +347,7 @@ export default function (pi: ExtensionAPI) {
 	});
 
 	pi.on("session_start", (_event, ctx) => {
-		maybeNameSkillSession(pi, ctx.sessionManager.getBranch() as SessionEntry[]);
+		maybeNameSkillSession(pi, ctx.sessionManager.getBranch());
 		scheduleHistoricalBackfill();
 	});
 }

@@ -10,6 +10,7 @@ import {
 	SUGGESTION_PROMPT_VERSION,
 } from "../../domain/seed";
 import type { SuggestionUsage } from "../../domain/suggestion";
+import { normalizeSuggestionUsage } from "../../domain/usage";
 import type { FileHash } from "../ports/file-hash";
 import type { Logger } from "../ports/logger";
 import type { ModelClient } from "../ports/model-client";
@@ -165,7 +166,7 @@ export class ReseedRunner {
 		) {
 			return undefined;
 		}
-		return usage;
+		return normalizeSuggestionUsage(usage);
 	}
 
 	public isRunning(): boolean {

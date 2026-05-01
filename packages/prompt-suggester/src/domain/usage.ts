@@ -24,19 +24,33 @@ export function emptyUsageStats(): SuggestionUsageStats {
 	};
 }
 
+export function normalizeSuggestionUsage(
+	usage: SuggestionUsage,
+): SuggestionUsage {
+	return {
+		inputTokens: normalizeFiniteNonNegativeNumber(usage.inputTokens),
+		outputTokens: normalizeFiniteNonNegativeNumber(usage.outputTokens),
+		cacheReadTokens: normalizeFiniteNonNegativeNumber(usage.cacheReadTokens),
+		cacheWriteTokens: normalizeFiniteNonNegativeNumber(usage.cacheWriteTokens),
+		totalTokens: normalizeFiniteNonNegativeNumber(usage.totalTokens),
+		costTotal: normalizeFiniteNonNegativeNumber(usage.costTotal),
+	};
+}
+
 export function addUsageStats(
 	current: SuggestionUsageStats,
 	usage: SuggestionUsage,
 ): SuggestionUsageStats {
+	const normalized = normalizeSuggestionUsage(usage);
 	return {
 		calls: current.calls + 1,
-		inputTokens: current.inputTokens + usage.inputTokens,
-		outputTokens: current.outputTokens + usage.outputTokens,
-		cacheReadTokens: current.cacheReadTokens + usage.cacheReadTokens,
-		cacheWriteTokens: current.cacheWriteTokens + usage.cacheWriteTokens,
-		totalTokens: current.totalTokens + usage.totalTokens,
-		costTotal: current.costTotal + usage.costTotal,
-		last: usage,
+		inputTokens: current.inputTokens + normalized.inputTokens,
+		outputTokens: current.outputTokens + normalized.outputTokens,
+		cacheReadTokens: current.cacheReadTokens + normalized.cacheReadTokens,
+		cacheWriteTokens: current.cacheWriteTokens + normalized.cacheWriteTokens,
+		totalTokens: current.totalTokens + normalized.totalTokens,
+		costTotal: current.costTotal + normalized.costTotal,
+		last: normalized,
 	};
 }
 
@@ -45,13 +59,17 @@ export function accumulateUsage(
 	usage: SuggestionUsage | undefined,
 ): SuggestionUsage {
 	if (!usage) return current;
+	const normalizedCurrent = normalizeSuggestionUsage(current);
+	const normalizedUsage = normalizeSuggestionUsage(usage);
 	return {
-		inputTokens: current.inputTokens + usage.inputTokens,
-		outputTokens: current.outputTokens + usage.outputTokens,
-		cacheReadTokens: current.cacheReadTokens + usage.cacheReadTokens,
-		cacheWriteTokens: current.cacheWriteTokens + usage.cacheWriteTokens,
-		totalTokens: current.totalTokens + usage.totalTokens,
-		costTotal: current.costTotal + usage.costTotal,
+		inputTokens: normalizedCurrent.inputTokens + normalizedUsage.inputTokens,
+		outputTokens: normalizedCurrent.outputTokens + normalizedUsage.outputTokens,
+		cacheReadTokens:
+			normalizedCurrent.cacheReadTokens + normalizedUsage.cacheReadTokens,
+		cacheWriteTokens:
+			normalizedCurrent.cacheWriteTokens + normalizedUsage.cacheWriteTokens,
+		totalTokens: normalizedCurrent.totalTokens + normalizedUsage.totalTokens,
+		costTotal: normalizedCurrent.costTotal + normalizedUsage.costTotal,
 	};
 }
 

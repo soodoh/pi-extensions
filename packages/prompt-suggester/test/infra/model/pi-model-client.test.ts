@@ -597,6 +597,33 @@ test("PiModelClient seeder tools allow filenames that begin with dot-dot", async
 	expect(preview).toContain("1: # Plan");
 });
 
+test("PiModelClient normalizes malformed provider usage values", async (t) => {
+	const provider = registerTestProvider({
+		content: [{ type: "text", text: "ok" }],
+		usage: {
+			input: Number.NaN,
+			output: Number.POSITIVE_INFINITY,
+			cacheRead: -1,
+			cacheWrite: 5,
+			totalTokens: Number.NEGATIVE_INFINITY,
+			cost: { total: -0.01 },
+		},
+	});
+	t.onTestFinished(() => provider.unregister());
+	const client = new PiModelClient(createRuntimeWithModel(provider.model));
+
+	const result = await client.generateSuggestion(createSuggestionContext());
+
+	expect(result.usage).toEqual({
+		inputTokens: 0,
+		outputTokens: 0,
+		cacheReadTokens: 0,
+		cacheWriteTokens: 5,
+		totalTokens: 0,
+		costTotal: 0,
+	});
+});
+
 test("PiModelClient read tool returns a bounded slice for large files", async () => {
 	const cwd = await tempDir("pi-suggester-read");
 	const largePath = join(cwd, "large.txt");
@@ -614,4 +641,47 @@ test("PiModelClient read tool returns a bounded slice for large files", async ()
 	expect(preview).toContain("2502: line-2502");
 	expect(preview).not.toContain("2499: line-2499");
 	expect(preview).not.toContain("2503: line-2503");
+});
+
+test("PiModelClient read tool refuses files over the byte cap", async () => {
+	const cwd = await tempDir("pi-suggester-read-cap");
+	await writeFile(join(cwd, "huge.txt"), "x".repeat(300 * 1024), "utf8");
+	await writeFile(join(cwd, "visible.txt"), "visible\n", "utf8");
+
+	const preview = await runSeederToolPreview(cwd, "read", {
+		path: "huge.txt",
+	});
+
+	expect(preview).toContain("[read truncated: file is");
+	expect(preview).toContain("max 262144 bytes");
+});
+
+test("PiModelClient read tool truncates overlong lines", async () => {
+	const cwd = await tempDir("pi-suggester-read-line-cap");
+	await writeFile(join(cwd, "single-line.txt"), "x".repeat(3000), "utf8");
+	await writeFile(join(cwd, "visible.txt"), "visible\n", "utf8");
+
+	const preview = await runSeederToolPreview(cwd, "read", {
+		path: "single-line.txt",
+	});
+
+	expect(preview).toContain("[line truncated at 2000 chars]");
+});
+
+test("PiModelClient find tool returns diagnostics when traversal hits depth cap", async () => {
+	const cwd = await tempDir("pi-suggester-find-cap");
+	let current = cwd;
+	for (let index = 0; index < 14; index += 1) {
+		current = join(current, `level-${index}`);
+		await mkdir(current);
+	}
+	await writeFile(join(current, "target.txt"), "deep\n", "utf8");
+	await writeFile(join(cwd, "visible.txt"), "visible\n", "utf8");
+
+	const preview = await runSeederToolPreview(cwd, "find", {
+		path: ".",
+		pattern: "target.txt",
+	});
+
+	expect(preview).toContain("[find truncated: depth cap 12 reached");
 });

@@ -569,6 +569,106 @@ nodes:
 		).toBeUndefined();
 	});
 
+	test("approvePlan reports manual resume when follow-up handoff send fails", async () => {
+		const home = await tempDir("pi-workflows-runner-approve-handoff-home");
+		const cwd = await tempDir("pi-workflows-runner-approve-handoff-cwd");
+		await writeFile(join(cwd, "plan.md"), "# Plan\n", "utf8");
+		const { WorkflowRunner } = await importRunnerWithHome(home);
+		const { getRun, saveRun } = await import("../src/store");
+		await saveRun({
+			...runRecord("pwf-77777777", cwd, "planning"),
+			planningSessionPath: join(cwd, "planning-session.json"),
+		});
+		const runner = new WorkflowRunner(
+			{
+				events: {
+					emit: () => {},
+					on: () => undefined,
+				},
+				async sendUserMessage() {
+					throw new Error("handoff unavailable");
+				},
+			},
+			pathToFileURL(new URL("../index.ts", import.meta.url).pathname).href,
+		);
+
+		const result = await runner.approvePlan(
+			"pwf-77777777",
+			"plan.md",
+			undefined,
+			workflowCtx(cwd, join(cwd, "planning-session.json")),
+		);
+
+		expect(result.approved).toBe(true);
+		expect(result.text).toContain("failed to queue execution handoff");
+		expect(result.text).toContain(
+			"Run /workflow-continue pwf-77777777 manually",
+		);
+		expect((await getRun("pwf-77777777"))?.phase).toBe("approved");
+	});
+
+	test("submitPlan reports manual resume when reviewed handoff send fails", async () => {
+		const home = await tempDir("pi-workflows-runner-submit-handoff-home");
+		const cwd = await tempDir("pi-workflows-runner-submit-handoff-cwd");
+		await writeFile(join(cwd, "plan.md"), "# Plan\n", "utf8");
+		const { WorkflowRunner } = await importRunnerWithHome(home);
+		const { getRun, saveRun } = await import("../src/store");
+		await saveRun({
+			...runRecord("pwf-88888888", cwd, "planning"),
+			planningSessionPath: join(cwd, "planning-session.json"),
+		});
+		let reviewHandler: ((event: unknown) => void) | undefined;
+		const runner = new WorkflowRunner(
+			{
+				events: {
+					emit: (_channel, payload) => {
+						if (
+							payload &&
+							typeof payload === "object" &&
+							"respond" in payload &&
+							typeof payload.respond === "function"
+						) {
+							payload.respond({
+								status: "handled",
+								result: { status: "pending", reviewId: "review-1" },
+							});
+							setTimeout(() => {
+								reviewHandler?.({
+									reviewId: "review-1",
+									approved: true,
+									feedback: "ok",
+								});
+							}, 0);
+						}
+					},
+					on: (_channel, handler) => {
+						reviewHandler = handler;
+						return () => {
+							reviewHandler = undefined;
+						};
+					},
+				},
+				async sendUserMessage() {
+					throw new Error("handoff unavailable");
+				},
+			},
+			pathToFileURL(new URL("../index.ts", import.meta.url).pathname).href,
+		);
+
+		const result = await runner.submitPlan(
+			"pwf-88888888",
+			"plan.md",
+			workflowCtx(cwd, join(cwd, "planning-session.json")),
+		);
+
+		expect(result.approved).toBe(true);
+		expect(result.text).toContain("failed to queue execution handoff");
+		expect(result.text).toContain(
+			"Run /workflow-continue pwf-88888888 manually",
+		);
+		expect((await getRun("pwf-88888888"))?.phase).toBe("approved");
+	});
+
 	test("continueExecution leaves approved runs approved when kickoff send fails", async () => {
 		const home = await tempDir("pi-workflows-runner-send-fail-home");
 		const cwd = await tempDir("pi-workflows-runner-send-fail-cwd");

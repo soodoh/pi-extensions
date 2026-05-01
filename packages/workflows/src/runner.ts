@@ -71,6 +71,10 @@ async function readBoundedPlanMarkdown(
 	return readFile(fullPath, "utf8");
 }
 
+function errorMessage(error: unknown): string {
+	return error instanceof Error ? error.message : String(error);
+}
+
 type WorkflowSessionManager = {
 	getSessionFile?: () => string | undefined;
 	appendSessionInfo?: (name: string) => void;
@@ -303,9 +307,13 @@ export class WorkflowRunner {
 		run.approvalNotes = review.feedback;
 		run.logs.push(`${nowIso()} plan approved review=${review.reviewId}`);
 		await saveRun(run);
-		this.pi.sendUserMessage?.(`/workflow-continue ${run.id}`, {
-			deliverAs: "followUp",
-		});
+		const handoffError = await this.queueExecutionHandoff(run.id);
+		if (handoffError) {
+			return {
+				approved: true,
+				text: `Plan approved for workflow ${run.id}, but failed to queue execution handoff: ${handoffError}. Run /workflow-continue ${run.id} manually to continue.`,
+			};
+		}
 		return {
 			approved: true,
 			text: `Plan approved for workflow ${run.id}. Queued fresh execution handoff.`,
@@ -332,13 +340,29 @@ export class WorkflowRunner {
 			`${nowIso()} plan prompt-approved${approvalNotes ? `: ${approvalNotes}` : ""}`,
 		);
 		await saveRun(run);
-		this.pi.sendUserMessage?.(`/workflow-continue ${run.id}`, {
-			deliverAs: "followUp",
-		});
+		const handoffError = await this.queueExecutionHandoff(run.id);
+		if (handoffError) {
+			return {
+				approved: true,
+				text: `Plan prompt-approved for workflow ${run.id}, but failed to queue execution handoff: ${handoffError}. Run /workflow-continue ${run.id} manually to continue.`,
+			};
+		}
 		return {
 			approved: true,
 			text: `Plan prompt-approved for workflow ${run.id}. Queued fresh execution handoff.`,
 		};
+	}
+	private async queueExecutionHandoff(
+		runId: string,
+	): Promise<string | undefined> {
+		try {
+			await this.pi.sendUserMessage?.(`/workflow-continue ${runId}`, {
+				deliverAs: "followUp",
+			});
+			return undefined;
+		} catch (error) {
+			return errorMessage(error);
+		}
 	}
 	private async readPlanArtifact(
 		runId: string,

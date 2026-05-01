@@ -1,4 +1,4 @@
-import { appendFile, mkdir, open, readFile } from "node:fs/promises";
+import { appendFile, chmod, mkdir, open, readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -30,6 +30,19 @@ function parsePromptLine(line: string): string | undefined {
 
 function isNotFoundError(error: unknown): boolean {
 	return error instanceof Error && Reflect.get(error, "code") === "ENOENT";
+}
+
+async function chmodIfPossible(path: string, mode: number): Promise<void> {
+	try {
+		await chmod(path, mode);
+	} catch {
+		// Best effort: chmod may be unsupported on some filesystems.
+	}
+}
+
+async function ensurePrivateDirectory(path: string): Promise<void> {
+	await mkdir(path, { recursive: true, mode: 0o700 });
+	await chmodIfPossible(path, 0o700);
 }
 
 async function readLastPrompt(
@@ -113,12 +126,13 @@ export async function appendPrompt(
 		if (lastPrompt === trimmed) return false;
 	}
 
-	await mkdir(dirname(historyPath), { recursive: true });
+	await ensurePrivateDirectory(dirname(historyPath));
 	await appendFile(
 		historyPath,
 		`${JSON.stringify({ ts: new Date().toISOString(), prompt: trimmed })}\n`,
-		"utf8",
+		{ encoding: "utf8", mode: 0o600 },
 	);
+	await chmodIfPossible(historyPath, 0o600);
 	lastPersistedPromptByPath.set(historyPath, trimmed);
 	return true;
 }

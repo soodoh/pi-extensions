@@ -119,7 +119,7 @@ A workflow node must define exactly one node type. Supported node type fields in
 - `workerReviewLoop`
 - `worktreeWave`
 
-Nodes may use `depends_on`, `trigger_rule`, `context`, `model`, `thinking`, `modelPolicy`, `output_format`, `output_artifact`, `timeout`, and loop settings. The current conditional expression support is intentionally narrow and used by the built-ins for plan complexity routing:
+Execution nodes may use `depends_on`, `trigger_rule`, `context`, `model`, `thinking`, `modelPolicy`, `output_format`, `output_artifact`, `timeout`, and loop settings; these fields are rendered into the execution graph handoff. Workflow-level `modelPolicy` supports `default` and `planning`; unsupported stage keys are rejected so ignored policy does not silently ship. The current conditional expression support is intentionally narrow and used by the built-ins for plan complexity routing:
 
 ```yaml
 when: "$classify-plan.output.complexity == 'simple'"

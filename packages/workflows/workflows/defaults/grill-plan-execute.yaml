@@ -7,13 +7,11 @@ description: |
 modelPolicy:
   default: { model: auto, thinking: auto }
   planning: { model: auto, thinking: high }
-  reviewer: { model: auto, thinking: high }
 
 nodes:
   - id: create-plan
     command: pi-grill-plannotator-plan
     context: newSession
-    output_artifact: plan
 
   - id: handoff-to-execution
     depends_on: [create-plan]
@@ -27,12 +25,6 @@ nodes:
     depends_on: [handoff-to-execution]
     command: pi-classify-plan-complexity
     context: fresh
-    output_format:
-      type: object
-      properties:
-        complexity: { type: string, enum: [simple, medium, complex] }
-      required: [complexity]
-
   - id: simple-implementation
     depends_on: [classify-plan]
     when: "$classify-plan.output.complexity == 'simple'"

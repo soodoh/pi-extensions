@@ -1,6 +1,11 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import type { EventLog, LoggedEvent } from "../../app/ports/event-log";
+import {
+	appendPrivateFile,
+	ensurePrivateDirectory,
+	writePrivateFile,
+} from "../storage/private-fs";
 
 interface NdjsonEventLogOptions {
 	maxEntries?: number;
@@ -46,7 +51,7 @@ export class NdjsonEventLog implements EventLog {
 	public async append(event: LoggedEvent): Promise<void> {
 		this.queue = this.queue.then(async () => {
 			const dir = path.dirname(this.filePath);
-			await fs.mkdir(dir, { recursive: true });
+			await ensurePrivateDirectory(dir);
 			const payload: LoggedEvent = {
 				...event,
 				meta: event.meta
@@ -56,11 +61,7 @@ export class NdjsonEventLog implements EventLog {
 						>)
 					: undefined,
 			};
-			await fs.appendFile(
-				this.filePath,
-				`${JSON.stringify(payload)}\n`,
-				"utf8",
-			);
+			await appendPrivateFile(this.filePath, `${JSON.stringify(payload)}\n`);
 			await this.rotateIfNeeded();
 		});
 		await this.queue;
@@ -74,6 +75,6 @@ export class NdjsonEventLog implements EventLog {
 			.filter(Boolean);
 		if (lines.length <= this.maxEntries) return;
 		const trimmed = `${lines.slice(-this.maxEntries).join("\n")}\n`;
-		await fs.writeFile(this.filePath, trimmed, "utf8");
+		await writePrivateFile(this.filePath, trimmed);
 	}
 }

@@ -455,6 +455,15 @@ ${renderedNodes.join("\n\n")}`;
 			node.when ? `when: ${node.when}` : undefined,
 			node.trigger_rule ? `trigger_rule: ${node.trigger_rule}` : undefined,
 			node.context ? `context: ${node.context}` : undefined,
+			node.model ? `model: ${node.model}` : undefined,
+			node.thinking ? `thinking: ${node.thinking}` : undefined,
+			renderNodeMetadata("modelPolicy", node.modelPolicy),
+			renderNodeMetadata("output_format", node.output_format),
+			node.output_artifact
+				? `output_artifact: ${node.output_artifact}`
+				: undefined,
+			node.timeout !== undefined ? `timeout: ${node.timeout}` : undefined,
+			renderNodeMetadata("loop", node.loop),
 		]
 			.filter(Boolean)
 			.join("\n");
@@ -641,6 +650,11 @@ function renderTemplate(text: string, vars: Record<string, string>): string {
 	for (const [key, value] of Object.entries(vars))
 		out = out.replaceAll(`$${key}`, value);
 	return out;
+}
+
+function renderNodeMetadata(name: string, value: unknown): string | undefined {
+	if (value === undefined) return undefined;
+	return `${name}: ${JSON.stringify(value)}`;
 }
 
 function firstLine(text: string): string {

@@ -35,6 +35,7 @@ import { renderSuggestionPrompt } from "../../prompts/suggestion-template";
 import { renderTranscriptSteeringPrompt } from "../../prompts/transcript-steering-template";
 
 const execFileAsync = promisify(execFile);
+const GREP_TIMEOUT_MS = 10_000;
 const IGNORED_DIRS = new Set([
 	".git",
 	"node_modules",
@@ -128,6 +129,12 @@ type SeederModelResponse =
 interface SeederHistoryEntry {
 	modelResponse: string;
 	toolResult?: string;
+}
+
+function getErrorProperty(error: unknown, key: string): unknown {
+	return typeof error === "object" && error !== null
+		? Reflect.get(error, key)
+		: undefined;
 }
 
 class SeederRunError extends Error {
@@ -1064,21 +1071,30 @@ export class PiModelClient implements ModelClient {
 			const { stdout } = await execFileAsync("rg", rgArgs, {
 				cwd: this.cwd,
 				maxBuffer: 1024 * 1024 * 10,
+				timeout: GREP_TIMEOUT_MS,
 			});
 			return truncate(stdout.trim() || "(no matches)", 8000);
 		} catch (error) {
-			const err = error as NodeJS.ErrnoException & {
-				stdout?: string;
-				stderr?: string;
-				code?: number | string;
-			};
-			if (String(err.code) === "1") return "(no matches)";
-			const stdout = typeof err.stdout === "string" ? err.stdout.trim() : "";
-			const stderr = typeof err.stderr === "string" ? err.stderr.trim() : "";
-			return truncate(
-				[stdout, stderr].filter(Boolean).join("\n") || "(grep failed)",
-				8000,
-			);
+			const code = getErrorProperty(error, "code");
+			if (String(code) === "1") return "(no matches)";
+			const signal = getErrorProperty(error, "signal");
+			const timedOut =
+				getErrorProperty(error, "killed") === true || signal === "SIGTERM";
+			const rawStdout = getErrorProperty(error, "stdout");
+			const rawStderr = getErrorProperty(error, "stderr");
+			const stdout = typeof rawStdout === "string" ? rawStdout.trim() : "";
+			const stderr = typeof rawStderr === "string" ? rawStderr.trim() : "";
+			const fallback = [stdout, stderr].filter(Boolean).join("\n");
+			this.logger?.warn("seeder.tool.grep.failed", {
+				path: path.relative(this.cwd, searchPath) || ".",
+				timedOut,
+				error: timedOut
+					? "grep timed out"
+					: error instanceof Error
+						? error.message
+						: "grep failed",
+			});
+			return truncate(fallback || "(grep failed)", 8000);
 		}
 	}
 

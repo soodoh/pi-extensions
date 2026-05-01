@@ -73,6 +73,107 @@ nodes:
 		);
 	});
 
+	test("drops workflows with cyclic depends_on and reports diagnostics", async () => {
+		const home = await tempDir("pi-workflows-cycle-home");
+		const cwd = await tempDir("pi-workflows-cycle-cwd");
+		const extensionRoot = await tempDir("pi-workflows-cycle-extension");
+		const workflowDir = join(extensionRoot, "workflows", "defaults");
+		const commandDir = join(extensionRoot, "commands", "defaults");
+		await mkdir(workflowDir, { recursive: true });
+		await mkdir(commandDir, { recursive: true });
+		await writeFile(
+			join(commandDir, "known.md"),
+			"Run known command\n",
+			"utf8",
+		);
+		await writeFile(
+			join(workflowDir, "cycle.yaml"),
+			`name: cycle
+
+description: Cyclic workflow
+
+nodes:
+  - id: first
+    depends_on: [second]
+    command: known
+  - id: second
+    depends_on: [third]
+    command: known
+  - id: third
+    depends_on: [first]
+    command: known
+`,
+			"utf8",
+		);
+		await writeFile(
+			join(workflowDir, "reciprocal.yaml"),
+			`name: reciprocal
+
+description: Reciprocal workflow
+
+nodes:
+  - id: left
+    depends_on: [right]
+    command: known
+  - id: right
+    depends_on: [left]
+    command: known
+`,
+			"utf8",
+		);
+
+		const { loadWorkflowConfig } = await importConfigLoaderWithHome(home);
+		const config = await loadWorkflowConfig(cwd, extensionRoot);
+
+		expect(config.workflows).toEqual([]);
+		expect(config.diagnostics).toHaveLength(2);
+		expect(config.diagnostics.join("\n")).toContain(
+			"workflow dependency cycle",
+		);
+		expect(config.diagnostics.join("\n")).toContain(
+			"first -> second -> third -> first",
+		);
+		expect(config.diagnostics.join("\n")).toContain("left -> right -> left");
+	});
+
+	test("drops workflows with unsupported modelPolicy stages", async () => {
+		const home = await tempDir("pi-workflows-policy-home");
+		const cwd = await tempDir("pi-workflows-policy-cwd");
+		const extensionRoot = await tempDir("pi-workflows-policy-extension");
+		const workflowDir = join(extensionRoot, "workflows", "defaults");
+		const commandDir = join(extensionRoot, "commands", "defaults");
+		await mkdir(workflowDir, { recursive: true });
+		await mkdir(commandDir, { recursive: true });
+		await writeFile(
+			join(commandDir, "known.md"),
+			"Run known command\n",
+			"utf8",
+		);
+		await writeFile(
+			join(workflowDir, "reviewer-policy.yaml"),
+			`name: reviewer-policy
+
+description: Unsupported policy stage
+
+modelPolicy:
+  default: { model: inherit }
+  reviewer: { model: auto }
+
+nodes:
+  - id: run
+    command: known
+`,
+			"utf8",
+		);
+
+		const { loadWorkflowConfig } = await importConfigLoaderWithHome(home);
+		const config = await loadWorkflowConfig(cwd, extensionRoot);
+
+		expect(config.workflows).toEqual([]);
+		expect(config.diagnostics).toHaveLength(1);
+		expect(config.diagnostics[0]).toContain("unsupported stage keys: reviewer");
+	});
+
 	test("drops workflows with unknown root, node, and nested keys", async () => {
 		const home = await tempDir("pi-workflows-unknown-keys-home");
 		const cwd = await tempDir("pi-workflows-unknown-keys-cwd");

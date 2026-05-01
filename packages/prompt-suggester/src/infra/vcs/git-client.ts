@@ -4,6 +4,7 @@ import { promisify } from "node:util";
 import type { VcsClient } from "../../app/ports/vcs-client";
 
 const execFileAsync = promisify(execFile);
+const GIT_TIMEOUT_MS = 10_000;
 
 export class GitClient implements VcsClient {
 	public constructor(private readonly cwd: string = process.cwd()) {}
@@ -57,6 +58,7 @@ export class GitClient implements VcsClient {
 			const { stdout } = await execFileAsync("git", args, {
 				cwd: this.cwd,
 				maxBuffer: 1024 * 1024 * 10,
+				timeout: GIT_TIMEOUT_MS,
 			});
 			return stdout;
 		} catch {

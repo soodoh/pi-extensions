@@ -1,4 +1,4 @@
-import { access, mkdtemp } from "node:fs/promises";
+import { access, mkdtemp, stat } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { expect, test } from "vitest";
@@ -130,6 +130,14 @@ test("SessionStateStore writes persistent files under the provided project state
 	await access(interactionPath);
 	await access(usagePath);
 	await access(metaPath);
+	await expect(stat(storageContext.storageDir)).resolves.toMatchObject({
+		mode: expect.any(Number),
+	});
+	expect((await stat(storageContext.storageDir)).mode & 0o777).toBe(0o700);
+	expect((await stat(storageContext.interactionDir)).mode & 0o777).toBe(0o700);
+	expect((await stat(interactionPath)).mode & 0o777).toBe(0o600);
+	expect((await stat(usagePath)).mode & 0o777).toBe(0o600);
+	expect((await stat(metaPath)).mode & 0o777).toBe(0o600);
 
 	const state = await store.load();
 	expect(state.lastSuggestion?.text).toBe("Persist me");

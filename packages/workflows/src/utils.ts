@@ -1,6 +1,13 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
-import { mkdir, readFile, realpath, rename, writeFile } from "node:fs/promises";
+import {
+	chmod,
+	mkdir,
+	readFile,
+	realpath,
+	rename,
+	writeFile,
+} from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -60,11 +67,26 @@ export async function readTextIfExists(
 	if (!existsSync(path)) return undefined;
 	return readFile(path, "utf8");
 }
+async function chmodIfPossible(path: string, mode: number): Promise<void> {
+	try {
+		await chmod(path, mode);
+	} catch {
+		// Best effort: chmod may be unsupported on some filesystems.
+	}
+}
+
 export async function writeJson(path: string, data: unknown): Promise<void> {
-	await mkdir(dirname(path), { recursive: true });
+	const directory = dirname(path);
+	await mkdir(directory, { recursive: true, mode: 0o700 });
+	await chmodIfPossible(directory, 0o700);
 	const tempPath = `${path}.${process.pid}.${randomUUID()}.tmp`;
-	await writeFile(tempPath, `${JSON.stringify(data, null, 2)}\n`, "utf8");
+	await writeFile(tempPath, `${JSON.stringify(data, null, 2)}\n`, {
+		encoding: "utf8",
+		mode: 0o600,
+	});
+	await chmodIfPossible(tempPath, 0o600);
 	await rename(tempPath, path);
+	await chmodIfPossible(path, 0o600);
 }
 export function extensionDir(importMetaUrl: string): string {
 	return dirname(fileURLToPath(importMetaUrl));

@@ -204,6 +204,7 @@ function validateWorkflow(
 	if (!Value.Check(workflowDefinitionSchema, value)) {
 		throw new Error("workflow root must match workflow schema");
 	}
+	validateModelPolicyStages(value.modelPolicy);
 	const ids = new Set<string>();
 	const nodes = value.nodes.map((node, index) =>
 		validateNode(node, index, ids),
@@ -214,11 +215,53 @@ function validateWorkflow(
 				throw new Error(`node ${node.id} depends_on unknown node ${dep}`);
 		}
 	}
+	validateNoDependencyCycles(nodes);
 	return {
 		...value,
 		nodes,
 		sourcePath,
 	};
+}
+
+function validateModelPolicyStages(
+	modelPolicy: WorkflowDefinition["modelPolicy"],
+): void {
+	if (!modelPolicy) return;
+	const supportedStages = new Set(["default", "planning"]);
+	const unsupported = Object.keys(modelPolicy).filter(
+		(stage) => !supportedStages.has(stage),
+	);
+	if (unsupported.length > 0) {
+		throw new Error(
+			`workflow modelPolicy has unsupported stage keys: ${unsupported.join(", ")}. Supported keys: default, planning`,
+		);
+	}
+}
+
+function validateNoDependencyCycles(nodes: WorkflowNode[]): void {
+	const byId = new Map(nodes.map((node) => [node.id, node]));
+	const state = new Map<string, "visiting" | "visited">();
+	const stack: string[] = [];
+
+	function visit(node: WorkflowNode): void {
+		const currentState = state.get(node.id);
+		if (currentState === "visited") return;
+		if (currentState === "visiting") {
+			const cycleStart = stack.indexOf(node.id);
+			const cycle = [...stack.slice(Math.max(0, cycleStart)), node.id];
+			throw new Error(`workflow dependency cycle: ${cycle.join(" -> ")}`);
+		}
+		state.set(node.id, "visiting");
+		stack.push(node.id);
+		for (const dep of node.depends_on ?? []) {
+			const dependency = byId.get(dep);
+			if (dependency) visit(dependency);
+		}
+		stack.pop();
+		state.set(node.id, "visited");
+	}
+
+	for (const node of nodes) visit(node);
 }
 
 function validateNode(

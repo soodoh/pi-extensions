@@ -77,7 +77,10 @@ function createPi() {
 	};
 }
 
-function createContext(cwd: string): SessionContext {
+function createContext(
+	cwd: string,
+	options: { sessionFile?: string; sessionId?: string } = {},
+): SessionContext {
 	return {
 		hasUI: false,
 		sessionManager: {
@@ -85,7 +88,10 @@ function createContext(cwd: string): SessionContext {
 				return cwd;
 			},
 			getSessionFile() {
-				return undefined;
+				return options.sessionFile;
+			},
+			getSessionId() {
+				return options.sessionId ?? options.sessionFile ?? "session-1";
 			},
 			getLeafId() {
 				return "leaf-1";
@@ -102,17 +108,38 @@ beforeEach(() => {
 	createAppCompositionMock.mockClear();
 });
 
-test("prompt suggester caches app composition by active session cwd", async () => {
+test("prompt suggester caches app composition by active session cwd and session", async () => {
 	const firstCwd = path.resolve("/tmp/project-one");
 	const secondCwd = path.resolve("/tmp/project-two");
 	const pi = createPi();
+	const firstContext = createContext(firstCwd, { sessionId: "session-one" });
 	suggester(pi);
 
-	await pi.handlers.get("session_start")?.({}, createContext(firstCwd));
-	await pi.handlers.get("session_start")?.({}, createContext(firstCwd));
+	await pi.handlers.get("session_start")?.({}, firstContext);
+	await pi.handlers.get("session_start")?.({}, firstContext);
 	await pi.handlers.get("session_start")?.({}, createContext(secondCwd));
 
 	expect(compositionCwds).toEqual([firstCwd, secondCwd]);
 	expect(createAppCompositionMock).toHaveBeenNthCalledWith(1, pi, firstCwd);
 	expect(createAppCompositionMock).toHaveBeenNthCalledWith(2, pi, secondCwd);
+});
+
+test("prompt suggester isolates runtime composition for simultaneous same-project sessions", async () => {
+	const cwd = path.resolve("/tmp/project-one");
+	const pi = createPi();
+	suggester(pi);
+
+	await pi.handlers.get("session_start")?.(
+		{},
+		createContext(cwd, { sessionFile: "/tmp/session-a.json" }),
+	);
+	await pi.handlers.get("session_start")?.(
+		{},
+		createContext(cwd, { sessionFile: "/tmp/session-b.json" }),
+	);
+
+	expect(compositionCwds).toEqual([cwd, cwd]);
+	expect(createAppCompositionMock).toHaveBeenCalledTimes(2);
+	expect(createAppCompositionMock).toHaveBeenNthCalledWith(1, pi, cwd);
+	expect(createAppCompositionMock).toHaveBeenNthCalledWith(2, pi, cwd);
 });

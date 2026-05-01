@@ -1,9 +1,9 @@
-import { promises as fs } from "node:fs";
 import path from "node:path";
 import type { SuggestionUsage } from "../../domain/suggestion";
 import { addUsageStats } from "../../domain/usage";
 import { atomicWriteJson } from "../storage/atomic-write";
 import { readJsonIfExists } from "../storage/json-file";
+import { ensurePrivateDirectory } from "../storage/private-fs";
 import {
 	emptyUsagePair,
 	normalizePersistedUsagePair,
@@ -47,7 +47,7 @@ export class SessionUsageLedger {
 						? addUsageStats(current.seeder, usage)
 						: current.seeder,
 			};
-			await fs.mkdir(path.dirname(usageKey), { recursive: true });
+			await ensurePrivateDirectory(path.dirname(usageKey));
 			await atomicWriteJson(usageKey, {
 				schemaVersion: STORE_SCHEMA_VERSION,
 				suggestionUsage: next.suggester,

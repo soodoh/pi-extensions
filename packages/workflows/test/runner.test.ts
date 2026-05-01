@@ -127,6 +127,74 @@ describe("workflow runner kickoff", () => {
 		expect((await getRun("pwf-22222222"))?.phase).toBe("completed");
 	});
 
+	test("execute-plan handoff renders supported node metadata fields", async () => {
+		const home = await tempDir("pi-workflows-runner-metadata-home");
+		const cwd = await tempDir("pi-workflows-runner-metadata-cwd");
+		await mkdir(join(cwd, ".pi", "workflows"), { recursive: true });
+		await writeFile(
+			join(cwd, ".pi", "workflows", "execute-plan.yaml"),
+			`name: execute-plan
+
+description: Custom execute-plan metadata test
+
+nodes:
+  - id: metadata-node
+    prompt: Run with metadata
+    model: provider/model
+    thinking: high
+    modelPolicy: { model: auto, thinking: medium }
+    output_format: { type: object }
+    output_artifact: result
+    timeout: 30
+    loop:
+      until: done
+      max_iterations: 2
+`,
+			"utf8",
+		);
+		const planPath = join(cwd, "plan.md");
+		await writeFile(planPath, "# Plan\n\n- [ ] Update one file\n", "utf8");
+		const { WorkflowRunner } = await importRunnerWithHome(home);
+		let kickoff = "";
+		const ctx: WorkflowContext = {
+			cwd,
+			async sendUserMessage(message) {
+				kickoff = message;
+			},
+			async newSession(options) {
+				await options.withSession({
+					...ctx,
+					async sendUserMessage(message) {
+						kickoff = message;
+					},
+				});
+			},
+		};
+		const runner = new WorkflowRunner(
+			{
+				events: {
+					emit: () => {},
+					on: () => undefined,
+				},
+				appendEntry: () => {},
+			},
+			pathToFileURL(new URL("../index.ts", import.meta.url).pathname).href,
+		);
+
+		await runner.startWorkflow("execute-plan", "plan.md", ctx);
+
+		expect(kickoff).toContain("### Node: metadata-node");
+		expect(kickoff).toContain("model: provider/model");
+		expect(kickoff).toContain("thinking: high");
+		expect(kickoff).toContain(
+			'modelPolicy: {"model":"auto","thinking":"medium"}',
+		);
+		expect(kickoff).toContain('output_format: {"type":"object"}');
+		expect(kickoff).toContain("output_artifact: result");
+		expect(kickoff).toContain("timeout: 30");
+		expect(kickoff).toContain('loop: {"until":"done","max_iterations":2}');
+	});
+
 	test("execute-plan handoff excludes the existing-plan loader node", async () => {
 		const home = await tempDir("pi-workflows-runner-home");
 		const cwd = await tempDir("pi-workflows-runner-cwd");

@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
@@ -41,6 +41,16 @@ describe("shared prompt history store", () => {
 			"first prompt",
 			"second prompt",
 		]);
+	});
+
+	test("writes prompt history with private permissions", async () => {
+		const dir = await makeTempDir();
+		const historyPath = join(dir, "private", "prompt-history.jsonl");
+
+		await appendPrompt("secret prompt", historyPath);
+
+		expect((await stat(join(dir, "private"))).mode & 0o777).toBe(0o700);
+		expect((await stat(historyPath)).mode & 0o777).toBe(0o600);
 	});
 
 	test("skips blank prompts and consecutive duplicates", async () => {

@@ -1,6 +1,6 @@
-import { promises as fs } from "node:fs";
 import { atomicWriteJson } from "../storage/atomic-write";
 import { readJsonIfExists } from "../storage/json-file";
+import { ensurePrivateDirectory } from "../storage/private-fs";
 import {
 	extractLegacyInteractionSnapshots,
 	extractUsageTotals,
@@ -41,7 +41,7 @@ async function performMigration(params: {
 }): Promise<void> {
 	const { context, cwd, getSessionManager } = params;
 	if (!context.persistent) return;
-	await fs.mkdir(context.storageDir, { recursive: true });
+	await ensurePrivateDirectory(context.storageDir);
 	const existingMeta = await readJsonIfExists<PersistedSessionMetadata>(
 		context.metaFile,
 	);
@@ -54,7 +54,7 @@ async function performMigration(params: {
 	const importedLegacyEntries =
 		legacySnapshots.size > 0 || usageTotals.hasLedger;
 
-	await fs.mkdir(context.interactionDir, { recursive: true });
+	await ensurePrivateDirectory(context.interactionDir);
 	for (const [entryId, interaction] of legacySnapshots.entries()) {
 		await atomicWriteJson(
 			stateFilePath(context.interactionDir, entryId),

@@ -1,4 +1,4 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, test, vi } from "vitest";
@@ -65,6 +65,19 @@ describe("workflow run store", () => {
 		const runs = await listRuns();
 
 		expect(runs.map((run) => run.id)).toEqual(["pwf-22222222", "pwf-11111111"]);
+	});
+
+	test("writes workflow run state with private permissions", async () => {
+		const home = await tempHome("pi-workflows-store-private-home");
+		const { saveRun, workflowRunStorePath } = await importStoreWithHome(home);
+		await saveRun(runRecord("pwf-44444444", "2026-05-01T00:00:00.000Z"));
+
+		const dirMode = (await stat(workflowRunStorePath)).mode & 0o777;
+		const fileMode =
+			(await stat(join(workflowRunStorePath, "pwf-44444444.json"))).mode &
+			0o777;
+		expect(dirMode).toBe(0o700);
+		expect(fileMode).toBe(0o600);
 	});
 
 	test("rejects traversal run ids before reading or writing paths", async () => {

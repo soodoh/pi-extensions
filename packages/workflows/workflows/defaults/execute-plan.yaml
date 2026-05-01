@@ -6,24 +6,16 @@ description: |
 
 modelPolicy:
   default: { model: auto, thinking: auto }
-  reviewer: { model: auto, thinking: high }
 
 nodes:
   - id: load-plan
     command: pi-load-existing-plan
     context: newSession
-    output_artifact: plan
 
   - id: classify-plan
     depends_on: [load-plan]
     command: pi-classify-plan-complexity
     context: fresh
-    output_format:
-      type: object
-      properties:
-        complexity: { type: string, enum: [simple, medium, complex] }
-      required: [complexity]
-
   - id: simple-implementation
     depends_on: [classify-plan]
     when: "$classify-plan.output.complexity == 'simple'"

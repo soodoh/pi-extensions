@@ -58,41 +58,73 @@ function isExtensionContext(
 
 export default function suggester(pi: PromptSuggesterApi) {
 	const compositionPromises = new Map<string, Promise<AppComposition>>();
-	let ghostEditorInstallState: GhostEditorInstallState | undefined;
+	const sessionManagerKeys = new WeakMap<object, string>();
+	const ghostEditorInstallStateBySession = new Map<
+		string,
+		GhostEditorInstallState | undefined
+	>();
+	let nextAnonymousSessionId = 1;
 
 	function syncGhostEditorInstallation(
 		ctx: ExtensionContext,
 		composition: AppComposition,
+		sessionKey: string,
 	): void {
 		if (!ctx.hasUI) return;
 		const sessionFile = ctx.sessionManager.getSessionFile() ?? null;
-		ghostEditorInstallState = syncGhostEditorDecorator({
-			state: ghostEditorInstallState,
-			context: ctx,
-			sessionFile,
-			options: {
-				getSuggestion: () => composition.runtimeRef.getSuggestion(),
-				getSuggestionRevision: () =>
-					composition.runtimeRef.getSuggestionRevision(),
-				ghostAcceptKeys: composition.config.suggestion.ghostAcceptKeys,
-				ghostAcceptAndSendKeys:
-					composition.config.suggestion.ghostAcceptAndSendKeys,
-			},
-		});
+		const ghostEditorInstallState =
+			ghostEditorInstallStateBySession.get(sessionKey);
+		ghostEditorInstallStateBySession.set(
+			sessionKey,
+			syncGhostEditorDecorator({
+				state: ghostEditorInstallState,
+				context: ctx,
+				sessionFile,
+				options: {
+					getSuggestion: () => composition.runtimeRef.getSuggestion(),
+					getSuggestionRevision: () =>
+						composition.runtimeRef.getSuggestionRevision(),
+					ghostAcceptKeys: composition.config.suggestion.ghostAcceptKeys,
+					ghostAcceptAndSendKeys:
+						composition.config.suggestion.ghostAcceptAndSendKeys,
+				},
+			}),
+		);
 	}
 
 	function resolveSessionCwd(ctx: PromptSuggesterExtensionContext): string {
 		return path.resolve(ctx.sessionManager.getCwd() || process.cwd());
 	}
 
-	async function getComposition(cwd: string): Promise<AppComposition> {
-		let compositionPromise = compositionPromises.get(cwd);
+	function resolveSessionKey(ctx: PromptSuggesterExtensionContext): string {
+		const sessionFile = ctx.sessionManager.getSessionFile();
+		if (sessionFile) return `file:${path.resolve(sessionFile)}`;
+		const sessionId = ctx.sessionManager.getSessionId?.();
+		if (sessionId?.trim()) return `id:${sessionId.trim()}`;
+		const existing = sessionManagerKeys.get(ctx.sessionManager);
+		if (existing) return existing;
+		const next = `memory:${nextAnonymousSessionId}`;
+		nextAnonymousSessionId += 1;
+		sessionManagerKeys.set(ctx.sessionManager, next);
+		return next;
+	}
+
+	function compositionKey(ctx: PromptSuggesterExtensionContext): string {
+		return `${resolveSessionCwd(ctx)}\u0000${resolveSessionKey(ctx)}`;
+	}
+
+	async function getComposition(
+		ctx: PromptSuggesterExtensionContext,
+	): Promise<AppComposition> {
+		const key = compositionKey(ctx);
+		let compositionPromise = compositionPromises.get(key);
 		if (!compositionPromise) {
+			const cwd = resolveSessionCwd(ctx);
 			compositionPromise = createAppComposition(pi, cwd).catch((error) => {
-				compositionPromises.delete(cwd);
+				compositionPromises.delete(key);
 				throw error;
 			});
-			compositionPromises.set(cwd, compositionPromise);
+			compositionPromises.set(key, compositionPromise);
 		}
 		return await compositionPromise;
 	}
@@ -100,7 +132,7 @@ export default function suggester(pi: PromptSuggesterApi) {
 	async function setRuntimeContext(
 		ctx: PromptSuggesterExtensionContext,
 	): Promise<AppComposition> {
-		const composition = await getComposition(resolveSessionCwd(ctx));
+		const composition = await getComposition(ctx);
 		if (isExtensionContext(ctx)) composition.runtimeRef.setContext(ctx);
 		return composition;
 	}
@@ -108,11 +140,13 @@ export default function suggester(pi: PromptSuggesterApi) {
 	async function clearRuntimeContext(
 		ctx: PromptSuggesterExtensionContext,
 	): Promise<void> {
-		const compositionPromise = compositionPromises.get(resolveSessionCwd(ctx));
+		const key = compositionKey(ctx);
+		const compositionPromise = compositionPromises.get(key);
 		if (!compositionPromise) return;
 		try {
 			const composition = await compositionPromise;
 			if (isExtensionContext(ctx)) composition.runtimeRef.clearContext(ctx);
+			ghostEditorInstallStateBySession.delete(key);
 		} catch {
 			// If composition failed during startup, there is no runtime context to clear.
 		}
@@ -131,7 +165,7 @@ export default function suggester(pi: PromptSuggesterApi) {
 		composition: AppComposition,
 	): void {
 		if (!isExtensionContext(ctx) || !ctx.hasUI) return;
-		syncGhostEditorInstallation(ctx, composition);
+		syncGhostEditorInstallation(ctx, composition, resolveSessionKey(ctx));
 		refreshSuggesterUi(getUiContext(composition));
 	}
 

@@ -1,10 +1,10 @@
-import { promises as fs } from "node:fs";
 import type { StateStore } from "../../app/ports/state-store";
 import { INITIAL_RUNTIME_STATE, type RuntimeState } from "../../domain/state";
 import type { SuggestionUsage } from "../../domain/suggestion";
 import { addUsageStats } from "../../domain/usage";
 import { atomicWriteJson } from "../storage/atomic-write";
 import { readJsonIfExists } from "../storage/json-file";
+import { ensurePrivateDirectory } from "../storage/private-fs";
 import { ensureSessionMigration } from "./session-migration";
 import {
 	emptyUsagePair,
@@ -69,7 +69,7 @@ export class SessionStateStore implements StateStore {
 		}
 
 		await this.ensureMigrated(context);
-		await fs.mkdir(context.interactionDir, { recursive: true });
+		await ensurePrivateDirectory(context.interactionDir);
 		await atomicWriteJson(
 			stateFilePath(context.interactionDir, context.currentKey),
 			interaction,

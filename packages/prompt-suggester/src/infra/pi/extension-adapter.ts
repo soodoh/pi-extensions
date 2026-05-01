@@ -14,6 +14,7 @@ export type PromptSuggesterExtensionContext = {
 	sessionManager: {
 		getCwd(): string;
 		getSessionFile(): string | undefined;
+		getSessionId?: () => string;
 		getLeafId(): string | null | undefined;
 		getBranch(): PromptSuggesterBranchEntry[];
 	};

@@ -1,0 +1,29 @@
+{
+	"name": "workflows",
+	"version": "0.1.0",
+	"type": "module",
+	"description": "Deterministic YAML-defined workflows for Pi with Plannotator and subagent review loops.",
+	"main": "index.ts",
+	"files": [
+		"index.ts",
+		"src",
+		"commands",
+		"workflows",
+		"README.md"
+	],
+	"pi": {
+		"extensions": [
+			"./index.ts"
+		],
+		"prompts": [
+			"./commands"
+		],
+		"skills": [],
+		"themes": []
+	},
+	"scripts": {
+		"build": "tsc --noEmit",
+		"test": "vitest run --root ../.. packages/workflows --passWithNoTests",
+		"typecheck": "tsc --noEmit"
+	}
+}

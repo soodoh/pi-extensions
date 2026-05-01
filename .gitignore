@@ -1,0 +1,7 @@
+node_modules/
+dist/
+coverage/
+.turbo/
+.pi-lens/
+*.tsbuildinfo
+.DS_Store

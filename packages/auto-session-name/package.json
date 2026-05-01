@@ -1,0 +1,21 @@
+{
+	"name": "auto-session-name",
+	"version": "0.1.0",
+	"type": "module",
+	"description": "Pi extension that names skill-started sessions from the user's actual request.",
+	"main": "index.ts",
+	"files": [
+		"*.ts",
+		"README.md"
+	],
+	"pi": {
+		"extensions": [
+			"./index.ts"
+		]
+	},
+	"scripts": {
+		"build": "tsc --noEmit",
+		"test": "vitest run --root ../.. packages/auto-session-name --passWithNoTests",
+		"typecheck": "tsc --noEmit"
+	}
+}

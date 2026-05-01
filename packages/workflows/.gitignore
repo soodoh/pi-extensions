@@ -1,0 +1,8 @@
+# Generated files
+bun-debug.log*
+node_modules/
+dist/
+
+# Misc
+.DS_Store
+*.pem

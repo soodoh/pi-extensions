@@ -663,6 +663,31 @@ test("PiModelClient grep tool treats leading-option patterns as literals", async
 	expect(preview).toContain("visible.txt:1:literal --files token");
 });
 
+test("PiModelClient ls tool falls back for malformed limits", async () => {
+	const cwd = await tempDir("pi-suggester-ls-limit");
+	await writeFile(join(cwd, "visible.txt"), "visible\n", "utf8");
+
+	const preview = await runSeederToolPreview(cwd, "ls", {
+		path: ".",
+		limit: "not-a-number",
+	});
+
+	expect(preview).toContain("visible.txt");
+});
+
+test("PiModelClient grep tool falls back for malformed limits", async () => {
+	const cwd = await tempDir("pi-suggester-grep-limit");
+	await writeFile(join(cwd, "visible.txt"), "needle\n", "utf8");
+
+	const preview = await runSeederToolPreview(cwd, "grep", {
+		path: ".",
+		pattern: "needle",
+		limit: "not-a-number",
+	});
+
+	expect(preview).toContain("visible.txt:1:needle");
+});
+
 test("PiModelClient seeder tools operate on the checked real path", async () => {
 	const cwd = await tempDir("pi-suggester-realpath");
 	await mkdir(join(cwd, "safe"));

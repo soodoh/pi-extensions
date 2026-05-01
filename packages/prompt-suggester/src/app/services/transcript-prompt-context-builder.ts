@@ -29,6 +29,14 @@ function estimateTranscriptChars(messages: Message[]): number {
 	);
 }
 
+function truncateMessageContent(message: Message, maxChars: number): Message {
+	const text = textFromContent(message.content).slice(0, Math.max(0, maxChars));
+	if (message.role === "user" && typeof message.content === "string") {
+		return { ...message, content: text };
+	}
+	return { ...message, content: [{ type: "text", text }] };
+}
+
 function capTranscriptMessages(
 	messages: Message[],
 	maxMessages: number,
@@ -37,6 +45,11 @@ function capTranscriptMessages(
 	const capped = structuredClone(messages).slice(-maxMessages);
 	while (capped.length > 1 && estimateTranscriptChars(capped) > maxChars) {
 		capped.shift();
+	}
+	if (estimateTranscriptChars(capped) > maxChars && capped.length > 0) {
+		const newest = capped.at(-1);
+		if (newest)
+			capped[capped.length - 1] = truncateMessageContent(newest, maxChars);
 	}
 	return capped;
 }

@@ -194,7 +194,7 @@ test("TranscriptPromptContextBuilder trims oldest messages to fit transcript cha
 	]);
 });
 
-test("TranscriptPromptContextBuilder keeps newest single message when it exceeds char cap", () => {
+test("TranscriptPromptContextBuilder truncates newest single message to fit char cap", () => {
 	const builder = new TranscriptPromptContextBuilder(
 		{
 			...baseConfig,
@@ -216,9 +216,9 @@ test("TranscriptPromptContextBuilder keeps newest single message when it exceeds
 	const context = builder.build(null, { recentChanged: [] });
 
 	expect(context.transcriptMessageCount).toBe(1);
-	expect(context.transcriptCharCount).toBe(7);
+	expect(context.transcriptCharCount).toBe(3);
 	expect(context.transcriptMessages.map((message) => message.content)).toEqual([
-		"toolong",
+		"too",
 	]);
 });
 

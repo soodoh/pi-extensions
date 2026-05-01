@@ -11,19 +11,16 @@ type EditorFactory = NonNullable<
 	Parameters<ExtensionContext["ui"]["setEditorComponent"]>[0]
 >;
 
-type HistoryCapableEditor = ReturnType<EditorFactory> & {
-	addToHistory?: (text: string) => void;
-	onSubmit?: (text: string) => void | Promise<void>;
-};
+type EditorInstance = ReturnType<EditorFactory>;
+
+type SubmitHandler = (text: string) => void | Promise<void>;
 
 interface SharedPromptHistoryState {
 	loaded: boolean;
 	lastPersistedPrompt: string | undefined;
 	persistQueue: Promise<void>;
-	wrappedSubmit: ((text: string) => void | Promise<void>) | undefined;
+	wrappedSubmit: SubmitHandler | undefined;
 }
-
-const sharedPromptHistoryState = Symbol("sharedPromptHistoryState");
 
 interface SharedPromptHistoryOptions {
 	historyPath?: string;
@@ -46,10 +43,10 @@ type SharedPromptHistoryApi = {
 
 class SharedPromptHistoryEditor extends CustomEditor {}
 
-function getState(editor: HistoryCapableEditor): SharedPromptHistoryState {
-	const state = Reflect.get(editor, sharedPromptHistoryState) as
-		| SharedPromptHistoryState
-		| undefined;
+const editorStates = new WeakMap<object, SharedPromptHistoryState>();
+
+function getState(editor: EditorInstance): SharedPromptHistoryState {
+	const state = editorStates.get(editor);
 	if (state) return state;
 
 	const nextState: SharedPromptHistoryState = {
@@ -58,23 +55,36 @@ function getState(editor: HistoryCapableEditor): SharedPromptHistoryState {
 		persistQueue: Promise.resolve(),
 		wrappedSubmit: undefined,
 	};
-	Reflect.set(editor, sharedPromptHistoryState, nextState);
+	editorStates.set(editor, nextState);
 	return nextState;
 }
 
-function loadHistory(editor: HistoryCapableEditor, prompts: string[]): void {
+function getSubmitHandler(editor: EditorInstance): SubmitHandler | undefined {
+	const value = Reflect.get(editor, "onSubmit");
+	return typeof value === "function" ? value.bind(editor) : undefined;
+}
+
+function setSubmitHandler(
+	editor: EditorInstance,
+	handler: SubmitHandler,
+): void {
+	Reflect.set(editor, "onSubmit", handler);
+}
+
+function loadHistory(editor: EditorInstance, prompts: string[]): void {
 	const state = getState(editor);
-	if (state.loaded || typeof editor.addToHistory !== "function") return;
+	const addToHistory = Reflect.get(editor, "addToHistory");
+	if (state.loaded || typeof addToHistory !== "function") return;
 
 	for (const prompt of prompts) {
-		editor.addToHistory(prompt);
+		addToHistory.call(editor, prompt);
 		state.lastPersistedPrompt = prompt.trim();
 	}
 	state.loaded = true;
 }
 
 async function persistPrompt(
-	editor: HistoryCapableEditor,
+	editor: EditorInstance,
 	text: string,
 	historyPath: string,
 ): Promise<void> {
@@ -96,9 +106,9 @@ async function persistPrompt(
 	}
 }
 
-function wrapOnSubmit(editor: HistoryCapableEditor, historyPath: string): void {
+function wrapOnSubmit(editor: EditorInstance, historyPath: string): void {
 	const state = getState(editor);
-	const original = editor.onSubmit;
+	const original = getSubmitHandler(editor);
 	if (!original || original === state.wrappedSubmit) return;
 
 	state.wrappedSubmit = (text: string) => {
@@ -109,11 +119,11 @@ function wrapOnSubmit(editor: HistoryCapableEditor, historyPath: string): void {
 		void state.persistQueue;
 		return original(text);
 	};
-	editor.onSubmit = state.wrappedSubmit;
+	setSubmitHandler(editor, state.wrappedSubmit);
 }
 
 function enhanceEditor(
-	editor: HistoryCapableEditor,
+	editor: EditorInstance,
 	prompts: string[],
 	historyPath: string,
 ): void {
@@ -139,11 +149,7 @@ export default function sharedPromptHistory(
 			originalSetEditorComponent(
 				factory
 					? (tui, theme, keybindings) => {
-							const editor = factory(
-								tui,
-								theme,
-								keybindings,
-							) as HistoryCapableEditor;
+							const editor = factory(tui, theme, keybindings);
 							enhanceEditor(editor, history, historyPath);
 							return editor;
 						}

@@ -16,7 +16,6 @@ import type {
 	ModelInvocationSettings,
 	SuggestionModelContext,
 } from "../../app/ports/model-client";
-import type { SuggestionPromptContext } from "../../app/services/prompt-context-builder";
 import type { TranscriptSuggestionPromptContext } from "../../app/services/transcript-prompt-context-builder";
 import {
 	REQUIRED_SEED_CATEGORIES,
@@ -149,10 +148,45 @@ interface SeederHistoryEntry {
 	toolResult?: string;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function errorMessage(error: unknown): string {
+	return error instanceof Error ? error.message : String(error);
+}
+
 function getErrorProperty(error: unknown, key: string): unknown {
-	return typeof error === "object" && error !== null
-		? Reflect.get(error, key)
-		: undefined;
+	return isRecord(error) ? Reflect.get(error, key) : undefined;
+}
+
+function isStreamSimpleLike(value: unknown): value is StreamSimpleLike {
+	return typeof value === "function";
+}
+
+function parseSeederToolName(value: unknown): SeederToolName | undefined {
+	switch (String(value ?? "").trim()) {
+		case "ls":
+			return "ls";
+		case "find":
+			return "find";
+		case "grep":
+			return "grep";
+		case "read":
+			return "read";
+		default:
+			return undefined;
+	}
+}
+
+function isRequiredSeedCategory(
+	category: SeedKeyFileCategory,
+): category is keyof SeedCategoryFindings {
+	return (
+		category === "vision" ||
+		category === "architecture" ||
+		category === "principles_guidelines"
+	);
 }
 
 class SeederRunError extends Error {
@@ -220,13 +254,8 @@ function extractText(content: unknown): string {
 	if (!Array.isArray(content)) return "";
 	return content
 		.map((block) => {
-			if (
-				block &&
-				typeof block === "object" &&
-				"type" in block &&
-				(block as { type?: string }).type === "text"
-			) {
-				return String((block as { text?: unknown }).text ?? "");
+			if (isRecord(block) && block.type === "text") {
+				return String(block.text ?? "");
 			}
 			return "";
 		})
@@ -243,10 +272,7 @@ function isTranscriptSuggestionContext(
 function tryParseObjectJson(text: string): Record<string, unknown> | undefined {
 	try {
 		const parsed = JSON.parse(text);
-		if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-			return parsed as Record<string, unknown>;
-		}
-		return undefined;
+		return isRecord(parsed) ? parsed : undefined;
 	} catch {
 		return undefined;
 	}
@@ -340,45 +366,50 @@ function coerceCategory(value: unknown): SeedKeyFileCategory {
 	return "other";
 }
 
+function coerceSeedCategoryFinding(value: unknown):
+	| {
+			found: boolean;
+			rationale: string;
+			files: string[];
+	  }
+	| undefined {
+	if (!isRecord(value)) return undefined;
+	return {
+		found: Boolean(value.found),
+		rationale: String(value.rationale ?? "").trim(),
+		files: coerceStringArray(value.files),
+	};
+}
+
 function coerceCategoryFindings(
 	value: unknown,
 ): SeedCategoryFindings | undefined {
-	if (!value || typeof value !== "object") return undefined;
-	const obj = value as Record<string, unknown>;
-	const categories: Array<"vision" | "architecture" | "principles_guidelines"> =
-		["vision", "architecture", "principles_guidelines"];
-	const findings = {} as SeedCategoryFindings;
-	for (const category of categories) {
-		const raw = obj[category];
-		if (!raw || typeof raw !== "object") continue;
-		const entry = raw as Record<string, unknown>;
-		findings[category] = {
-			found: Boolean(entry.found),
-			rationale: String(entry.rationale ?? "").trim(),
-			files: coerceStringArray(entry.files),
-		};
-	}
-	return Object.keys(findings).length > 0 ? findings : undefined;
+	if (!isRecord(value)) return undefined;
+	const vision = coerceSeedCategoryFinding(value.vision);
+	const architecture = coerceSeedCategoryFinding(value.architecture);
+	const principlesGuidelines = coerceSeedCategoryFinding(
+		value.principles_guidelines,
+	);
+	if (!vision || !architecture || !principlesGuidelines) return undefined;
+	return {
+		vision,
+		architecture,
+		principles_guidelines: principlesGuidelines,
+	};
 }
 
 function coerceSeedDraft(payload: Record<string, unknown>): SeedDraft {
 	const keyFiles = Array.isArray(payload.keyFiles)
 		? payload.keyFiles
 				.map((entry) => {
-					if (!entry || typeof entry !== "object") return null;
-					const filePath = String(
-						(entry as { path?: unknown }).path ?? "",
-					).trim();
-					const whyImportant = String(
-						(entry as { whyImportant?: unknown }).whyImportant ?? "",
-					).trim();
+					if (!isRecord(entry)) return null;
+					const filePath = String(entry.path ?? "").trim();
+					const whyImportant = String(entry.whyImportant ?? "").trim();
 					if (!filePath) return null;
 					return {
 						path: filePath,
 						whyImportant: whyImportant || "High-signal file",
-						category: coerceCategory(
-							(entry as { category?: unknown }).category,
-						),
+						category: coerceCategory(entry.category),
 					};
 				})
 				.filter(
@@ -423,24 +454,26 @@ function parseSeederResponse(text: string): SeederModelResponse {
 	const parsed = parseJsonObject(text);
 	const type = String(parsed.type ?? "").trim();
 	if (type === "tool") {
-		const tool = String(parsed.tool ?? "").trim() as SeederToolName;
-		if (!tool || !["ls", "find", "grep", "read"].includes(tool)) {
-			throw new Error(`Invalid seeder tool: ${tool || "(empty)"}`);
+		const tool = parseSeederToolName(parsed.tool);
+		if (!tool) {
+			throw new Error(
+				`Invalid seeder tool: ${String(parsed.tool ?? "").trim() || "(empty)"}`,
+			);
 		}
 		return {
 			type: "tool",
 			tool,
-			arguments: (parsed.arguments ?? {}) as Record<string, unknown>,
+			arguments: isRecord(parsed.arguments) ? parsed.arguments : {},
 			reason: String(parsed.reason ?? "").trim() || undefined,
 		};
 	}
 	if (type === "final") {
-		if (!parsed.seed || typeof parsed.seed !== "object") {
+		if (!isRecord(parsed.seed)) {
 			throw new Error("Seeder final response missing seed object");
 		}
 		return {
 			type: "final",
-			seed: parsed.seed as Record<string, unknown>,
+			seed: parsed.seed,
 		};
 	}
 	throw new Error(`Invalid seeder response type: ${type || "(empty)"}`);
@@ -501,8 +534,8 @@ function validateSeedCoverage(draft: SeedDraft): {
 	}
 
 	for (const category of REQUIRED_SEED_CATEGORIES) {
-		const finding =
-			findings[category as "vision" | "architecture" | "principles_guidelines"];
+		if (!isRequiredSeedCategory(category)) continue;
+		const finding = findings[category];
 		if (!finding) {
 			return { ok: false, reason: `Missing categoryFindings.${category}` };
 		}
@@ -747,7 +780,7 @@ export class PiModelClient implements ModelClient {
 			};
 		} catch (error) {
 			if (error instanceof SeederRunError) throw error;
-			throw new SeederRunError((error as Error).message, usage);
+			throw new SeederRunError(errorMessage(error), usage);
 		}
 	}
 
@@ -781,7 +814,7 @@ export class PiModelClient implements ModelClient {
 					content: [
 						{
 							type: "text",
-							text: renderSuggestionPrompt(context as SuggestionPromptContext),
+							text: renderSuggestionPrompt(context),
 						},
 					],
 					timestamp: Date.now(),
@@ -945,12 +978,8 @@ export class PiModelClient implements ModelClient {
 	}
 
 	private getClaudeBridgeStreamSimple(): StreamSimpleLike | undefined {
-		const value = (globalThis as Record<symbol, unknown>)[
-			CLAUDE_BRIDGE_STREAM_SIMPLE_KEY
-		];
-		return typeof value === "function"
-			? (value as StreamSimpleLike)
-			: undefined;
+		const value = Reflect.get(globalThis, CLAUDE_BRIDGE_STREAM_SIMPLE_KEY);
+		return isStreamSimpleLike(value) ? value : undefined;
 	}
 
 	private isMissingProviderRegistrationError(
@@ -1103,7 +1132,7 @@ export class PiModelClient implements ModelClient {
 	private async toolLs(args: Record<string, unknown>): Promise<string> {
 		const absolute = await this.resolvePath(args.path);
 		const realRoot = await this.realCwd();
-		const limit = Math.min(500, Math.max(1, Number(args.limit ?? 200)));
+		const limit = this.parsePositiveInteger(args.limit, 200, 500);
 		const entries = await fs.readdir(absolute, { withFileTypes: true });
 		const lines = entries
 			.filter(
@@ -1202,7 +1231,7 @@ export class PiModelClient implements ModelClient {
 		const searchPath = await this.resolvePath(args.path);
 		const pattern = String(args.pattern ?? "").trim();
 		if (!pattern) throw new Error("grep requires pattern");
-		const limit = Math.min(200, Math.max(1, Number(args.limit ?? 80)));
+		const limit = this.parsePositiveInteger(args.limit, 80, 200);
 		const rgArgs = [
 			"--line-number",
 			"--no-heading",
@@ -1238,11 +1267,7 @@ export class PiModelClient implements ModelClient {
 			this.logger?.warn("seeder.tool.grep.failed", {
 				path: path.relative(await this.realCwd(), searchPath) || ".",
 				timedOut,
-				error: timedOut
-					? "grep timed out"
-					: error instanceof Error
-						? error.message
-						: "grep failed",
+				error: timedOut ? "grep timed out" : errorMessage(error),
 			});
 			return truncate(fallback || "(grep failed)", 8000);
 		}

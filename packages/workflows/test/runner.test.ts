@@ -60,6 +60,64 @@ afterEach(async () => {
 });
 
 describe("workflow runner kickoff", () => {
+	test("command rendering does not reprocess placeholders inserted from plan content", async () => {
+		const home = await tempDir("pi-workflows-render-plan-home");
+		const { WorkflowRunner } = await importRunnerWithHome(home);
+		const runner = new WorkflowRunner(
+			{
+				events: {
+					emit: () => {},
+					on: () => undefined,
+				},
+			},
+			pathToFileURL(new URL("../index.ts", import.meta.url).pathname).href,
+		);
+
+		const rendered = runner.renderCommand(
+			{
+				name: "execute",
+				content: "Run $WORKFLOW_ID with plan:\n$PLAN_CONTENT",
+				sourcePath: "test",
+			},
+			{
+				WORKFLOW_ID: "pwf-12345678",
+				PLAN_CONTENT: "Keep literal $WORKFLOW_ID in the plan.",
+			},
+		);
+
+		expect(rendered).toContain("Run pwf-12345678 with plan:");
+		expect(rendered).toContain("Keep literal $WORKFLOW_ID in the plan.");
+	});
+
+	test("command rendering does not reprocess placeholders inserted from user messages", async () => {
+		const home = await tempDir("pi-workflows-render-user-home");
+		const { WorkflowRunner } = await importRunnerWithHome(home);
+		const runner = new WorkflowRunner(
+			{
+				events: {
+					emit: () => {},
+					on: () => undefined,
+				},
+			},
+			pathToFileURL(new URL("../index.ts", import.meta.url).pathname).href,
+		);
+
+		const rendered = runner.renderCommand(
+			{
+				name: "plan",
+				content: "Run $WORKFLOW_ID for request:\n$USER_MESSAGE",
+				sourcePath: "test",
+			},
+			{
+				WORKFLOW_ID: "pwf-12345678",
+				USER_MESSAGE: "Keep literal $WORKFLOW_ID in the request.",
+			},
+		);
+
+		expect(rendered).toContain("Run pwf-12345678 for request:");
+		expect(rendered).toContain("Keep literal $WORKFLOW_ID in the request.");
+	});
+
 	test("plan tools refuse to mutate runs from the wrong session", async () => {
 		const home = await tempDir("pi-workflows-runner-session-home");
 		const cwd = await tempDir("pi-workflows-runner-session-cwd");

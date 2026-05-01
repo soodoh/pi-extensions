@@ -640,10 +640,7 @@ ${renderedNodes.join("\n\n")}`;
 		command: WorkflowCommand,
 		vars: Record<string, string>,
 	): string {
-		let text = command.content;
-		for (const [key, value] of Object.entries(vars))
-			text = text.replaceAll(`$${key}`, value);
-		return text;
+		return renderTemplate(command.content, vars);
 	}
 	artifactsDir(cwd: string, runId: string): string {
 		return join(cwd, ".pi", "workflow-runs", normalizeWorkflowRunId(runId));
@@ -784,10 +781,9 @@ function orderWorkflowNodes(nodes: WorkflowNode[]): WorkflowNode[] {
 }
 
 function renderTemplate(text: string, vars: Record<string, string>): string {
-	let out = text;
-	for (const [key, value] of Object.entries(vars))
-		out = out.replaceAll(`$${key}`, value);
-	return out;
+	return text.replace(/\$([A-Z][A-Z0-9_]*)/g, (match, key: string) => {
+		return vars[key] ?? match;
+	});
 }
 
 function renderNodeMetadata(name: string, value: unknown): string | undefined {

@@ -290,11 +290,15 @@ function hexToAnsi(hex: string): string {
 	return `\x1b[38;2;${r};${g};${b}m`;
 }
 
+function isHexColor(color: ColorValue): color is `#${string}` {
+	return /^#[0-9a-fA-F]{6}$/.test(color);
+}
+
 function applyColor(theme: Theme, color: ColorValue, text: string): string {
-	if (/^#[0-9a-fA-F]{6}$/.test(color)) {
+	if (isHexColor(color)) {
 		return `${hexToAnsi(color)}${text}${ANSI_RESET}`;
 	}
-	return theme.fg(color as ThemeColor, text);
+	return theme.fg(color, text);
 }
 
 function color(theme: Theme, semantic: SemanticColor, text: string): string {

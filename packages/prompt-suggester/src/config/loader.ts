@@ -18,9 +18,13 @@ function isObject(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function deepMerge<T>(base: T, override: unknown): T {
+function errorMessage(error: unknown): string {
+	return error instanceof Error ? error.message : String(error);
+}
+
+function deepMerge(base: unknown, override: unknown): unknown {
 	if (!isObject(base) || !isObject(override)) {
-		return (override as T) ?? base;
+		return override ?? base;
 	}
 
 	const result: Record<string, unknown> = { ...base };
@@ -32,7 +36,7 @@ function deepMerge<T>(base: T, override: unknown): T {
 			result[key] = value;
 		}
 	}
-	return result as T;
+	return result;
 }
 
 async function readRequiredConfig(
@@ -44,7 +48,7 @@ async function readRequiredConfig(
 		parsed = JSON.parse(raw);
 	} catch (error) {
 		throw new Error(
-			`Failed to load required default config ${filePath}: ${(error as Error).message}`,
+			`Failed to load required default config ${filePath}: ${errorMessage(error)}`,
 		);
 	}
 
@@ -67,7 +71,7 @@ async function readPiSettingsSuggesterOverride(
 		settings = await readJsonIfExists(settingsPath);
 	} catch (error) {
 		throw new Error(
-			`Failed to load Pi settings ${settingsPath}: ${(error as Error).message}`,
+			`Failed to load Pi settings ${settingsPath}: ${errorMessage(error)}`,
 		);
 	}
 	if (!isObject(settings)) return undefined;

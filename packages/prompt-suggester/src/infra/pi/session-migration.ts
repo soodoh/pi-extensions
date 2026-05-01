@@ -20,7 +20,8 @@ export async function ensureSessionMigration(params: {
 	getSessionManager: () => SessionReadableManager | undefined;
 	migrationTasks: Map<string, Promise<void>>;
 }): Promise<void> {
-	const migrationKey = params.context.storageDir!;
+	if (!params.context.persistent) return;
+	const migrationKey = params.context.storageDir;
 	const existingTask = params.migrationTasks.get(migrationKey);
 	if (existingTask) {
 		await existingTask;
@@ -39,9 +40,10 @@ async function performMigration(params: {
 	getSessionManager: () => SessionReadableManager | undefined;
 }): Promise<void> {
 	const { context, cwd, getSessionManager } = params;
-	await fs.mkdir(context.storageDir!, { recursive: true });
+	if (!context.persistent) return;
+	await fs.mkdir(context.storageDir, { recursive: true });
 	const existingMeta = await readJsonIfExists<PersistedSessionMetadata>(
-		context.metaFile!,
+		context.metaFile,
 	);
 	if (existingMeta?.schemaVersion === STORE_SCHEMA_VERSION) return;
 
@@ -52,16 +54,16 @@ async function performMigration(params: {
 	const importedLegacyEntries =
 		legacySnapshots.size > 0 || usageTotals.hasLedger;
 
-	await fs.mkdir(context.interactionDir!, { recursive: true });
+	await fs.mkdir(context.interactionDir, { recursive: true });
 	for (const [entryId, interaction] of legacySnapshots.entries()) {
 		await atomicWriteJson(
-			stateFilePath(context.interactionDir!, entryId),
+			stateFilePath(context.interactionDir, entryId),
 			interaction,
 		);
 	}
 
-	if (!(await readJsonIfExists<PersistedUsageState>(context.usageFile!))) {
-		await atomicWriteJson(context.usageFile!, {
+	if (!(await readJsonIfExists<PersistedUsageState>(context.usageFile))) {
+		await atomicWriteJson(context.usageFile, {
 			schemaVersion: STORE_SCHEMA_VERSION,
 			suggestionUsage: usageTotals.suggester,
 			seederUsage: usageTotals.seeder,
@@ -69,7 +71,7 @@ async function performMigration(params: {
 		} satisfies PersistedUsageState);
 	}
 
-	await atomicWriteJson(context.metaFile!, {
+	await atomicWriteJson(context.metaFile, {
 		schemaVersion: STORE_SCHEMA_VERSION,
 		sessionId: context.sessionId,
 		sessionFile: context.sessionFile,

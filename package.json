@@ -20,10 +20,11 @@
 		"build": "turbo run build",
 		"check": "biome check .",
 		"check:write": "biome check --write .",
-		"ci": "bun run check && bun run typecheck && bun run test:coverage",
+		"ci": "bun run check && bun run typecheck && bun run test:typecheck && bun run test:coverage",
 		"prepare": "lefthook install",
 		"test": "turbo run test",
 		"test:coverage": "vitest run --coverage",
+		"test:typecheck": "tsc --noEmit --project tsconfig.test.json",
 		"typecheck": "turbo run typecheck"
 	},
 	"devDependencies": {

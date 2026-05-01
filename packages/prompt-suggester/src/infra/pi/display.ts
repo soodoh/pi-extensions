@@ -1,7 +1,17 @@
-import type { ExtensionContext } from "@mariozechner/pi-coding-agent";
+type ModelLike = {
+	provider: string;
+	id: string;
+};
+
+type DisplayContextLike = {
+	model?: ModelLike;
+	modelRegistry: {
+		getAll(): ModelLike[];
+	};
+};
 
 export function getConfiguredModelDisplay(params: {
-	ctx: ExtensionContext | undefined;
+	ctx: DisplayContextLike | undefined;
 	configuredModel: string;
 	configuredThinking: string;
 	getSessionThinkingLevel: () => string;

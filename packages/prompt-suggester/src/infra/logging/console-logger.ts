@@ -59,6 +59,7 @@ export class ConsoleLogger implements Logger {
 		message: string,
 		meta?: Record<string, unknown>,
 	): void {
+		if (LEVEL_ORDER[level] < LEVEL_ORDER[this.level]) return;
 		if (this.options.eventLog) {
 			void this.options.eventLog
 				.append({
@@ -69,7 +70,6 @@ export class ConsoleLogger implements Logger {
 				})
 				.catch(() => undefined);
 		}
-		if (LEVEL_ORDER[level] < LEVEL_ORDER[this.level]) return;
 		const payload =
 			meta && Object.keys(meta).length > 0 ? ` ${JSON.stringify(meta)}` : "";
 		const line = truncate(`[suggester ${level}] ${message}${payload}`, 220);

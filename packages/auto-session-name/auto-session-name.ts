@@ -1,5 +1,5 @@
 import type { Dirent } from "node:fs";
-import { readdir, readFile, stat, writeFile } from "node:fs/promises";
+import { appendFile, readdir, readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -206,10 +206,9 @@ export const backfillSkillSessionNameInFile = async (
 	};
 
 	const suffix = content.endsWith("\n") ? "" : "\n";
-	await writeFile(
-		sessionPath,
-		`${content}${suffix}${JSON.stringify(sessionInfo)}\n`,
-	);
+	await appendFile(sessionPath, `${suffix}${JSON.stringify(sessionInfo)}\n`, {
+		flag: "a",
+	});
 	return true;
 };
 

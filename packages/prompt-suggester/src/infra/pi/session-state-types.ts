@@ -8,7 +8,7 @@ export const STORE_SCHEMA_VERSION = 1;
 export const ROOT_STATE_KEY = "__root__";
 
 export interface SessionReadableManager {
-	getBranch(): SessionEntry[];
+	getBranch(): Array<{ id: string }>;
 	getEntries(): SessionEntry[];
 	getSessionFile(): string | undefined;
 	getSessionId(): string;
@@ -52,17 +52,25 @@ export interface PersistedSessionMetadata {
 	};
 }
 
-export interface SessionStorageContext {
-	sessionId: string;
-	sessionFile: string | undefined;
-	storageDir?: string;
-	interactionDir?: string;
-	usageFile?: string;
-	metaFile?: string;
-	lookupKeys: string[];
-	currentKey: string;
-	persistent: boolean;
-}
+export type SessionStorageContext =
+	| {
+			sessionId: string;
+			sessionFile: undefined;
+			lookupKeys: string[];
+			currentKey: string;
+			persistent: false;
+	  }
+	| {
+			sessionId: string;
+			sessionFile: string;
+			storageDir: string;
+			interactionDir: string;
+			usageFile: string;
+			metaFile: string;
+			lookupKeys: string[];
+			currentKey: string;
+			persistent: true;
+	  };
 
 export interface SuggestionUsageStatsPair {
 	suggester: SuggestionUsageStats;

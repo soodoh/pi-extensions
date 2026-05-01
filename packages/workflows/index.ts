@@ -1,6 +1,9 @@
 import { type Static, type TSchema, Type } from "typebox";
 import { Value } from "typebox/value";
-import { WorkflowRunner } from "./src/runner";
+import {
+	type WorkflowContext as RunnerWorkflowContext,
+	WorkflowRunner,
+} from "./src/runner";
 import { getRun, listRuns, workflowRunStorePath } from "./src/store";
 import type { WorkflowRunRecord } from "./src/workflow-types";
 
@@ -10,8 +13,7 @@ type WorkflowUi = {
 	setStatus?: (name: string, status: string) => void;
 	setWidget?: (name: string, widget: () => { render: () => string[] }) => void;
 };
-type WorkflowContext = {
-	cwd: string;
+type WorkflowContext = RunnerWorkflowContext & {
 	hasUI?: boolean;
 	ui: WorkflowUi;
 };
@@ -38,7 +40,16 @@ type WorkflowCommand = {
 	description: string;
 	handler: (args: string | undefined, ctx: WorkflowContext) => Promise<void>;
 };
+type EventsLike = {
+	emit(channel: string, payload: unknown): void;
+	on(
+		channel: string,
+		handler: (data: unknown) => void,
+	): undefined | (() => void);
+};
+
 type PiApi = {
+	events: EventsLike;
 	on(
 		event: "session_start",
 		handler: (event: unknown, ctx: WorkflowContext) => void | Promise<void>,

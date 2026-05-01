@@ -48,6 +48,6 @@ test("prompt suggester state root normalizes unsafe project names", () => {
 	expect(path.basename(dir)).toMatch(/^My_Repo_-[a-f0-9]{12}$/);
 });
 
-function escapeRegExp(value) {
+function escapeRegExp(value: string): string {
 	return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }

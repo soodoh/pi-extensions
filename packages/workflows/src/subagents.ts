@@ -25,7 +25,7 @@ type SubagentEventsApi = {
 		on(
 			event: typeof RESPONSE,
 			handler: (response: SubagentResponse) => void,
-		): (() => void) | void;
+		): (() => void) | undefined;
 		emit(event: typeof REQUEST, payload: unknown): void;
 	};
 };

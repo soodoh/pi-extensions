@@ -1,8 +1,9 @@
 import { expect, test } from "vitest";
 import { TranscriptPromptContextBuilder } from "../../src/app/services/transcript-prompt-context-builder";
+import type { PromptSuggesterConfig } from "../../src/config/types";
 
-const baseConfig = {
-	schemaVersion: 7,
+const baseConfig: PromptSuggesterConfig = {
+	schemaVersion: 8,
 	seed: { maxDiffChars: 3000 },
 	reseed: {
 		enabled: true,
@@ -14,6 +15,8 @@ const baseConfig = {
 		noSuggestionToken: "[no suggestion]",
 		customInstruction: "Prefer terse confirmations.",
 		fastPathContinueOnError: true,
+		ghostAcceptKeys: ["right"],
+		ghostAcceptAndSendKeys: ["enter"],
 		maxAssistantTurnChars: 100000,
 		maxRecentUserPrompts: 20,
 		maxRecentUserPromptChars: 500,
@@ -24,6 +27,8 @@ const baseConfig = {
 		maxAbortContextChars: 280,
 		maxSuggestionChars: 200,
 		prefillOnlyWhenEditorEmpty: true,
+		showUsageInPanel: true,
+		showPanelStatus: true,
 		strategy: "compact",
 		transcriptMaxContextPercent: 70,
 		transcriptMaxMessages: 120,
@@ -118,7 +123,12 @@ test("TranscriptPromptContextBuilder preserves transcript metadata and slices ch
 	expect(context.sessionId).toBe("session-123");
 	expect(context.contextUsagePercent).toBe(42);
 	expect(context.transcriptMessageCount).toBe(2);
-	expect(context.transcriptMessages[0].content[0].text).toBe("fix the tests");
+	const firstContent = context.transcriptMessages[0].content[0];
+	expect(
+		typeof firstContent === "object" && firstContent.type === "text"
+			? firstContent.text
+			: "",
+	).toBe("fix the tests");
 	expect(context.transcriptCharCount > 0).toBe(true);
 	expect(context.recentChanged.length).toBe(2);
 	expect(context.customInstruction).toBe("Prefer terse confirmations.");

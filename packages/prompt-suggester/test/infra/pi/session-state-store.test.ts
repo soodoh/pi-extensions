@@ -4,8 +4,13 @@ import path from "node:path";
 import { expect, test } from "vitest";
 import { INITIAL_RUNTIME_STATE } from "../../../src/domain/state";
 import { SessionStateStore } from "../../../src/infra/pi/session-state-store";
+import type { SessionReadableManager } from "../../../src/infra/pi/session-state-types";
+import {
+	createSessionStorageContext,
+	stateFilePath,
+} from "../../../src/infra/pi/session-storage-context";
 
-function createInMemorySessionManager() {
+function createInMemorySessionManager(): SessionReadableManager {
 	return {
 		getBranch() {
 			return [];
@@ -28,7 +33,7 @@ function createInMemorySessionManager() {
 	};
 }
 
-function createPersistentSessionManager(cwd) {
+function createPersistentSessionManager(cwd: string): SessionReadableManager {
 	return {
 		getBranch() {
 			return [{ id: "root-entry" }, { id: "leaf-1" }];
@@ -108,25 +113,19 @@ test("SessionStateStore writes persistent files under the provided project state
 		costTotal: 0.01,
 	});
 
-	const interactionPath = path.join(
+	const storageContext = createSessionStorageContext(
 		projectStateDir,
-		"sessions",
-		"test_session",
-		"interaction",
-		"leaf-1.json",
+		sessionManager,
 	);
-	const usagePath = path.join(
-		projectStateDir,
-		"sessions",
-		"test_session",
-		"usage.json",
+	if (!storageContext.persistent) {
+		throw new Error("expected persistent storage context");
+	}
+	const interactionPath = stateFilePath(
+		storageContext.interactionDir,
+		"leaf-1",
 	);
-	const metaPath = path.join(
-		projectStateDir,
-		"sessions",
-		"test_session",
-		"meta.json",
-	);
+	const usagePath = storageContext.usageFile;
+	const metaPath = storageContext.metaFile;
 
 	await access(interactionPath);
 	await access(usagePath);

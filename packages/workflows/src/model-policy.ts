@@ -8,7 +8,7 @@ type ModelLike = {
 	cost?: { input?: number; output?: number };
 };
 type MaybePromise<T> = T | Promise<T>;
-type RegistryLike = {
+export type RegistryLike = {
 	getAll?: () => ModelLike[];
 	getAvailable?: () => MaybePromise<ModelLike[]>;
 	find?: (provider: string, id: string) => ModelLike | undefined;
@@ -137,9 +137,18 @@ export async function selectModel(
 	};
 }
 
+export type ModelPolicyPiApi = {
+	setModel?: (model: ModelLike) => MaybePromise<void>;
+	setThinkingLevel?: (thinking: ThinkingLevel) => void;
+};
+
+export type ModelPolicyContext = {
+	modelRegistry?: RegistryLike;
+};
+
 export async function applyModelPolicy(
-	pi: any,
-	ctx: any,
+	pi: ModelPolicyPiApi,
+	ctx: ModelPolicyContext,
 	policy: ModelPolicy | undefined,
 	stage: string,
 	complexity?: string,

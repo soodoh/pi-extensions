@@ -6,7 +6,7 @@ import { applyModelPolicy } from "./model-policy";
 import { reviewPlanWithPlannotator } from "./plannotator";
 import { getRun, saveRun } from "./store";
 import {
-	ensureInsideCwd,
+	ensureRealPathInsideCwd,
 	extensionDir,
 	makeRunId,
 	nowIso,
@@ -20,11 +20,44 @@ import type {
 	WorkflowRunRecord,
 } from "./workflow-types";
 
+type MaybePromise<T> = T | Promise<T>;
+
+type WorkflowSessionManager = {
+	getSessionFile?: () => string | undefined;
+	appendSessionInfo?: (name: string) => void;
+	appendMessage?: (message: {
+		role: "user";
+		content: Array<{ type: "text"; text: string }>;
+		timestamp: number;
+	}) => void;
+};
+
+export type WorkflowContext = {
+	cwd: string;
+	sessionManager?: WorkflowSessionManager;
+	newSession(options: {
+		parentSession?: string;
+		setup?: (sessionManager: WorkflowSessionManager) => MaybePromise<void>;
+		withSession: (ctx: WorkflowContext) => MaybePromise<void>;
+	}): Promise<void>;
+	sendUserMessage(message: string): Promise<void>;
+	modelRegistry?: Parameters<typeof applyModelPolicy>[1]["modelRegistry"];
+};
+
+type WorkflowPiApi = Parameters<typeof applyModelPolicy>[0] & {
+	events: import("./pi-events").EventsLike;
+	appendEntry?: (type: string, entry: Record<string, unknown>) => void;
+	sendUserMessage?: (
+		message: string,
+		options?: { deliverAs?: string },
+	) => void | Promise<void>;
+};
+
 export class WorkflowRunner {
 	private configCache: LoadedConfig | undefined;
-	private pi: any;
+	private pi: WorkflowPiApi;
 	private importMetaUrl: string;
-	constructor(pi: any, importMetaUrl: string) {
+	constructor(pi: WorkflowPiApi, importMetaUrl: string) {
 		this.pi = pi;
 		this.importMetaUrl = importMetaUrl;
 	}
@@ -64,7 +97,7 @@ export class WorkflowRunner {
 	async startWorkflow(
 		name: string,
 		args: string,
-		ctx: any,
+		ctx: WorkflowContext,
 	): Promise<WorkflowRunRecord> {
 		const workflow = await this.findWorkflow(ctx.cwd, name);
 		if (!workflow) throw new Error(`Unknown workflow: ${name}`);
@@ -92,7 +125,7 @@ export class WorkflowRunner {
 		run: WorkflowRunRecord,
 		workflow: WorkflowDefinition,
 		args: string,
-		ctx: any,
+		ctx: WorkflowContext,
 	): Promise<WorkflowRunRecord> {
 		const planNode = workflow.nodes.find(
 			(n) => n.id === "create-plan" && n.command,
@@ -122,10 +155,10 @@ export class WorkflowRunner {
 		const sessionName = `workflow: ${run.workflowName} planning ${run.id}`;
 		await ctx.newSession({
 			parentSession: ctx.sessionManager?.getSessionFile?.(),
-			setup: async (sm: any) => {
+			setup: async (sm) => {
 				sm.appendSessionInfo?.(sessionName);
 			},
-			withSession: async (newCtx: any) => {
+			withSession: async (newCtx) => {
 				run.planningSessionPath = newCtx.sessionManager?.getSessionFile?.();
 				run.logs.push(`${nowIso()} planning session started`);
 				await saveRun(run);
@@ -137,9 +170,9 @@ export class WorkflowRunner {
 	private async startExistingPlan(
 		run: WorkflowRunRecord,
 		args: string,
-		ctx: any,
+		ctx: WorkflowContext,
 	): Promise<WorkflowRunRecord> {
-		const full = ensureInsideCwd(run.cwd, args.trim());
+		const full = await ensureRealPathInsideCwd(run.cwd, args.trim());
 		if (!existsSync(full) || !/\.mdx?$/i.test(full))
 			throw new Error(
 				`Plan must be an existing markdown file inside workflow cwd: ${args}`,
@@ -157,7 +190,7 @@ export class WorkflowRunner {
 	async submitPlan(
 		runId: string,
 		filePath: string,
-		_ctx: any,
+		_ctx: WorkflowContext,
 	): Promise<{ approved: boolean; text: string }> {
 		const artifact = await this.readPlanArtifact(runId, filePath, [
 			"planning",
@@ -209,7 +242,7 @@ export class WorkflowRunner {
 		runId: string,
 		filePath: string,
 		approvalNotes: string | undefined,
-		_ctx: any,
+		_ctx: WorkflowContext,
 	): Promise<{ approved: boolean; text: string }> {
 		const artifact = await this.readPlanArtifact(runId, filePath, [
 			"planning",
@@ -250,7 +283,7 @@ export class WorkflowRunner {
 			throw new Error(
 				`Workflow run ${runId} is ${run.phase}; plan artifacts can only be submitted or approved while the run is ${allowedPhases.join(" or ")}.`,
 			);
-		const full = ensureInsideCwd(run.cwd, filePath);
+		const full = await ensureRealPathInsideCwd(run.cwd, filePath);
 		if (!existsSync(full) || !/\.mdx?$/i.test(full))
 			throw new Error(
 				`Plan must be an existing markdown file inside workflow cwd: ${filePath}`,
@@ -264,7 +297,7 @@ export class WorkflowRunner {
 			planContentHash: sha256(planContent),
 		};
 	}
-	async continueExecution(runId: string, ctx: any): Promise<void> {
+	async continueExecution(runId: string, ctx: WorkflowContext): Promise<void> {
 		const run = await getRun(runId);
 		if (!run) throw new Error(`Unknown workflow run: ${runId}`);
 		if (run.phase !== "approved" && run.phase !== "executing")
@@ -272,7 +305,7 @@ export class WorkflowRunner {
 				`Workflow run ${runId} is ${run.phase}; approve the plan before executing or resuming.`,
 			);
 		if (!run.planPath) throw new Error(`Workflow run ${runId} has no planPath`);
-		const full = ensureInsideCwd(run.cwd, run.planPath);
+		const full = await ensureRealPathInsideCwd(run.cwd, run.planPath);
 		const content = await this.approvedPlanContent(run, full);
 		run.phase = "executing";
 		if (!run.planContentHash) run.planContentHash = sha256(content);
@@ -295,7 +328,7 @@ export class WorkflowRunner {
 		const sessionName = `workflow: ${run.workflowName} execution ${run.id}`;
 		await ctx.newSession({
 			parentSession: ctx.sessionManager?.getSessionFile?.(),
-			setup: async (sm: any) => {
+			setup: async (sm) => {
 				sm.appendSessionInfo?.(sessionName);
 				sm.appendMessage?.({
 					role: "user",
@@ -308,7 +341,7 @@ export class WorkflowRunner {
 					timestamp: Date.now(),
 				});
 			},
-			withSession: async (newCtx: any) => {
+			withSession: async (newCtx) => {
 				run.executionSessionPath = newCtx.sessionManager?.getSessionFile?.();
 				await saveRun(run);
 				await newCtx.sendUserMessage(kickoff);

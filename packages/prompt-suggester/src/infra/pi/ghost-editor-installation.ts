@@ -1,10 +1,8 @@
-import {
-	CustomEditor,
-	type ExtensionContext,
-} from "@mariozechner/pi-coding-agent";
+import { CustomEditor } from "@mariozechner/pi-coding-agent";
 import type { GhostAcceptKey } from "../../config/types";
 import {
 	decorateGhostSuggestionEditor,
+	type GhostDecoratableEditor,
 	type GhostSuggestionDecoratorOptions,
 } from "./ghost-suggestion-decorator";
 
@@ -20,11 +18,19 @@ interface GhostEditorDecoratorRuntimeOptions {
 	ghostAcceptAndSendKeys: readonly GhostAcceptKey[];
 }
 
-type EditorFactory = (
+export type EditorFactory = (
 	tui: ConstructorParameters<typeof CustomEditor>[0],
 	theme: ConstructorParameters<typeof CustomEditor>[1],
 	keybindings: ConstructorParameters<typeof CustomEditor>[2],
-) => CustomEditor;
+) => GhostDecoratableEditor;
+
+type GhostEditorUi = {
+	setEditorComponent(factory: EditorFactory | undefined): void;
+};
+
+type GhostEditorContext = {
+	ui: GhostEditorUi;
+};
 
 const ghostDecoratorRuntimeState = Symbol(
 	"promptSuggesterGhostDecoratorRuntimeState",
@@ -36,7 +42,7 @@ class GhostDecoratorRuntime {
 	private options: GhostEditorDecoratorRuntimeOptions | undefined;
 
 	public constructor(
-		private readonly originalSetEditorComponent: ExtensionContext["ui"]["setEditorComponent"],
+		private readonly originalSetEditorComponent: GhostEditorUi["setEditorComponent"],
 	) {}
 
 	public setOptions(options: GhostEditorDecoratorRuntimeOptions): void {
@@ -47,7 +53,7 @@ class GhostDecoratorRuntime {
 		this.active = true;
 	}
 
-	public ensureDefaultEditorInstalled(ctx: ExtensionContext): void {
+	public ensureDefaultEditorInstalled(ctx: GhostEditorContext): void {
 		if (this.installedDefaultEditor) return;
 		this.installedDefaultEditor = true;
 		ctx.ui.setEditorComponent(undefined);
@@ -80,14 +86,16 @@ class GhostDecoratorRuntime {
 	}
 }
 
-function getRuntime(ctx: ExtensionContext): GhostDecoratorRuntime | undefined {
+function getRuntime(
+	ctx: GhostEditorContext,
+): GhostDecoratorRuntime | undefined {
 	const value = Reflect.get(ctx.ui, ghostDecoratorRuntimeState);
 	return typeof value === "object" && value instanceof GhostDecoratorRuntime
 		? value
 		: undefined;
 }
 
-function ensureRuntime(ctx: ExtensionContext): GhostDecoratorRuntime {
+function ensureRuntime(ctx: GhostEditorContext): GhostDecoratorRuntime {
 	const existing = getRuntime(ctx);
 	if (existing) return existing;
 
@@ -102,7 +110,7 @@ function ensureRuntime(ctx: ExtensionContext): GhostDecoratorRuntime {
 
 export function syncGhostEditorDecorator(params: {
 	state: GhostEditorInstallState | undefined;
-	context: ExtensionContext;
+	context: GhostEditorContext;
 	sessionFile: string | null;
 	options: GhostEditorDecoratorRuntimeOptions;
 }): GhostEditorInstallState | undefined {

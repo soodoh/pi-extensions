@@ -1,8 +1,9 @@
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { mkdir, readFile, realpath, rename, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { dirname, isAbsolute, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 export function makeRunId(): string {
 	return `pwf-${randomUUID().slice(0, 8)}`;
@@ -19,7 +20,22 @@ export function homePath(...parts: string[]): string {
 export function ensureInsideCwd(cwd: string, path: string): string {
 	const full = isAbsolute(path) ? resolve(path) : resolve(cwd, path);
 	const root = resolve(cwd);
-	if (full !== root && !full.startsWith(`${root}/`))
+	const relativePath = relative(root, full);
+	if (relativePath.startsWith("..") || isAbsolute(relativePath))
+		throw new Error(`Path must be inside cwd: ${path}`);
+	return full;
+}
+export async function ensureRealPathInsideCwd(
+	cwd: string,
+	path: string,
+): Promise<string> {
+	const full = ensureInsideCwd(cwd, path);
+	const [realRoot, realFull] = await Promise.all([
+		realpath(cwd),
+		realpath(full),
+	]);
+	const relativePath = relative(realRoot, realFull);
+	if (relativePath.startsWith("..") || isAbsolute(relativePath))
 		throw new Error(`Path must be inside cwd: ${path}`);
 	return full;
 }
@@ -36,5 +52,5 @@ export async function writeJson(path: string, data: unknown): Promise<void> {
 	await rename(tempPath, path);
 }
 export function extensionDir(importMetaUrl: string): string {
-	return dirname(new URL(importMetaUrl).pathname);
+	return dirname(fileURLToPath(importMetaUrl));
 }

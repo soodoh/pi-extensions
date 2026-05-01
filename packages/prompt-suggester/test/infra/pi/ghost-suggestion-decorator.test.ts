@@ -1,8 +1,30 @@
 import { expect, test } from "vitest";
-import { syncGhostEditorDecorator } from "../../../src/infra/pi/ghost-editor-installation";
-import { decorateGhostSuggestionEditor } from "../../../src/infra/pi/ghost-suggestion-decorator";
+import {
+	type EditorFactory,
+	syncGhostEditorDecorator,
+} from "../../../src/infra/pi/ghost-editor-installation";
+import {
+	decorateGhostSuggestionEditor,
+	type GhostDecoratableEditor,
+	type GhostSuggestionDecoratorOptions,
+} from "../../../src/infra/pi/ghost-suggestion-decorator";
 
-function createOptions(overrides = {}) {
+type OptionsOverrides = Partial<{
+	active: boolean;
+	suggestion: string;
+	revision: number;
+	ghostAcceptKeys: GhostSuggestionDecoratorOptions["ghostAcceptKeys"];
+	ghostAcceptAndSendKeys: GhostSuggestionDecoratorOptions["ghostAcceptAndSendKeys"];
+}>;
+
+type FakeEditor = GhostDecoratableEditor & {
+	text: string;
+	cursor: { line: number; col: number };
+	inputs: string[];
+	submitted: string[];
+};
+
+function createOptions(overrides: OptionsOverrides = {}) {
 	let active = overrides.active ?? true;
 	let suggestion = overrides.suggestion ?? "hello world";
 	let revision = overrides.revision ?? 1;
@@ -14,23 +36,23 @@ function createOptions(overrides = {}) {
 			ghostAcceptAndSendKeys: overrides.ghostAcceptAndSendKeys ?? ["enter"],
 			isActive: () => active,
 		},
-		setActive(next) {
+		setActive(next: boolean) {
 			active = next;
 		},
-		setSuggestion(next) {
+		setSuggestion(next: string) {
 			suggestion = next;
 			revision += 1;
 		},
 	};
 }
 
-function createFakeEditor() {
+function createFakeEditor(): FakeEditor {
 	return {
 		text: "",
 		cursor: { line: 0, col: 0 },
 		inputs: [],
 		submitted: [],
-		handleInput(data) {
+		handleInput(data: string) {
 			this.inputs.push(data);
 			if (data === "\r") {
 				this.submitted.push(this.text);
@@ -48,7 +70,8 @@ function createFakeEditor() {
 		getCursor() {
 			return this.cursor;
 		},
-		setText(text) {
+		invalidate() {},
+		setText(text: string) {
 			this.text = text;
 			this.cursor = { line: 0, col: text.length };
 		},
@@ -102,11 +125,11 @@ test("ghost decorator can be deactivated without replacing the editor", () => {
 });
 
 test("ghost decorator installation wraps future editor factories instead of reinstalling on every sync", () => {
-	const originalSetEditorCalls = [];
+	const originalSetEditorCalls: EditorFactory[] = [];
 	const ctx = {
 		ui: {
-			setEditorComponent(factory) {
-				originalSetEditorCalls.push(factory);
+			setEditorComponent(factory: EditorFactory | undefined) {
+				if (factory) originalSetEditorCalls.push(factory);
 			},
 		},
 	};
@@ -134,7 +157,11 @@ test("ghost decorator installation wraps future editor factories instead of rein
 	expect(originalSetEditorCalls.length).toBe(2);
 
 	const wrappedFactory = originalSetEditorCalls[1];
-	const wrappedEditor = wrappedFactory({}, {}, {});
+	const wrappedEditor: FakeEditor = Reflect.apply(wrappedFactory, undefined, [
+		{},
+		{},
+		{},
+	]);
 	expect(wrappedEditor).toBe(externalEditor);
 
 	wrappedEditor.handleInput("\x1b[C");

@@ -1,7 +1,8 @@
 import { expect, test } from "vitest";
+import type { SuggestionPromptContext } from "../../src/app/services/prompt-context-builder";
 import { renderSuggestionPrompt } from "../../src/prompts/suggestion-template";
 
-const baseContext = {
+const baseContext: SuggestionPromptContext = {
 	turnStatus: "success",
 	abortContextNote: undefined,
 	intentSeed: null,

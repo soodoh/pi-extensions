@@ -1,12 +1,17 @@
-export function requestViaEvent<
-	TRequest extends { requestId: string; respond: (response: unknown) => void },
-	TResult,
->(
-	events: any,
+export type EventsLike = {
+	emit(channel: string, payload: unknown): void;
+	on(
+		channel: string,
+		handler: (data: unknown) => void,
+	): undefined | (() => void);
+};
+
+export function requestViaEvent(
+	events: EventsLike,
 	channel: string,
-	request: Omit<TRequest, "requestId" | "respond">,
+	request: Record<string, unknown>,
 	timeoutMs = 10_000,
-): Promise<TResult> {
+): Promise<unknown> {
 	const requestId = `pwf-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 	return new Promise((resolve, reject) => {
 		const timeout = setTimeout(
@@ -18,7 +23,7 @@ export function requestViaEvent<
 			requestId,
 			respond: (response: unknown) => {
 				clearTimeout(timeout);
-				resolve(response as TResult);
+				resolve(response);
 			},
 		};
 		events.emit(channel, payload);
@@ -26,13 +31,13 @@ export function requestViaEvent<
 }
 
 export function waitForEvent<T>(
-	events: any,
+	events: EventsLike,
 	channel: string,
-	predicate: (event: T) => boolean,
+	predicate: (event: unknown) => event is T,
 	timeoutMs = 24 * 60 * 60 * 1000,
 ): Promise<T> {
 	return new Promise((resolve, reject) => {
-		const off = events.on(channel, (data: T) => {
+		const off = events.on(channel, (data: unknown) => {
 			if (!predicate(data)) return;
 			cleanup();
 			resolve(data);

@@ -69,9 +69,9 @@ export class SessionStateStore implements StateStore {
 		}
 
 		await this.ensureMigrated(context);
-		await fs.mkdir(context.interactionDir!, { recursive: true });
+		await fs.mkdir(context.interactionDir, { recursive: true });
 		await atomicWriteJson(
-			stateFilePath(context.interactionDir!, context.currentKey),
+			stateFilePath(context.interactionDir, context.currentKey),
 			interaction,
 		);
 	}
@@ -108,11 +108,11 @@ export class SessionStateStore implements StateStore {
 	}
 
 	private async loadInteractionState(
-		context: SessionStorageContext,
+		context: Extract<SessionStorageContext, { persistent: true }>,
 	): Promise<PersistedInteractionState> {
 		for (const key of context.lookupKeys) {
 			const state = await readJsonIfExists<PersistedInteractionState>(
-				stateFilePath(context.interactionDir!, key),
+				stateFilePath(context.interactionDir, key),
 			);
 			if (state) return normalizeInteractionState(state);
 		}

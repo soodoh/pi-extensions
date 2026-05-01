@@ -19,21 +19,21 @@ export class SessionUsageLedger {
 	private readonly usageTasks = new Map<string, Promise<void>>();
 
 	public async load(
-		context: SessionStorageContext,
+		context: Extract<SessionStorageContext, { persistent: true }>,
 	): Promise<SuggestionUsageStatsPair> {
 		const persisted = await readJsonIfExists<PersistedUsageState>(
-			context.usageFile!,
+			context.usageFile,
 		);
 		if (!persisted) return emptyUsagePair();
 		return normalizePersistedUsagePair(persisted);
 	}
 
 	public async record(
-		context: SessionStorageContext,
+		context: Extract<SessionStorageContext, { persistent: true }>,
 		kind: "suggester" | "seeder",
 		usage: SuggestionUsage,
 	): Promise<void> {
-		const usageKey = context.usageFile!;
+		const usageKey = context.usageFile;
 		const existingTask = this.usageTasks.get(usageKey) ?? Promise.resolve();
 		const task = existingTask.then(async () => {
 			const current = await this.load(context);
@@ -55,13 +55,11 @@ export class SessionUsageLedger {
 				updatedAt: new Date().toISOString(),
 			} satisfies PersistedUsageState);
 		});
-		this.usageTasks.set(
-			usageKey,
-			task.finally(() => {
-				if (this.usageTasks.get(usageKey) === task)
-					this.usageTasks.delete(usageKey);
-			}),
-		);
-		await task;
+		const trackedTask = task.finally(() => {
+			if (this.usageTasks.get(usageKey) === trackedTask)
+				this.usageTasks.delete(usageKey);
+		});
+		this.usageTasks.set(usageKey, trackedTask);
+		await trackedTask;
 	}
 }

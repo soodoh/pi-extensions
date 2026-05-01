@@ -24,11 +24,11 @@ export interface SuggestionSink {
 
 interface TurnEndOrchestratorDeps {
 	config: PromptSuggesterConfig;
-	seedStore: SeedStore;
+	seedStore: Pick<SeedStore, "load">;
 	stateStore: StateStore;
-	stalenessChecker: StalenessChecker;
-	reseedRunner: ReseedRunner;
-	suggestionEngine: SuggestionEngine;
+	stalenessChecker: Pick<StalenessChecker, "check">;
+	reseedRunner: Pick<ReseedRunner, "trigger">;
+	suggestionEngine: Pick<SuggestionEngine, "suggest">;
 	suggestionSink: SuggestionSink;
 	logger: Logger;
 	checkForStaleness: boolean;

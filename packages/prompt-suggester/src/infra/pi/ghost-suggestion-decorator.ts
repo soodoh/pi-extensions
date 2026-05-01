@@ -1,4 +1,3 @@
-import type { CustomEditor } from "@mariozechner/pi-coding-agent";
 import {
 	truncateToWidth,
 	visibleWidth,
@@ -35,12 +34,13 @@ interface GhostState {
 	multiline: boolean;
 }
 
-interface GhostDecoratableEditor {
+export interface GhostDecoratableEditor {
 	handleInput(data: string): void;
 	render(width: number): string[];
 	getText(): string;
 	getCursor(): { line: number; col: number };
 	setText(text: string): void;
+	invalidate(): void;
 }
 
 class GhostSuggestionDecorator {
@@ -218,10 +218,9 @@ class GhostSuggestionDecorator {
 	}
 }
 
-export function decorateGhostSuggestionEditor<TEditor extends CustomEditor>(
-	editor: TEditor,
-	getOptions: () => GhostSuggestionDecoratorOptions,
-): TEditor {
+export function decorateGhostSuggestionEditor<
+	TEditor extends GhostDecoratableEditor,
+>(editor: TEditor, getOptions: () => GhostSuggestionDecoratorOptions): TEditor {
 	if (Reflect.get(editor, ghostSuggestionDecoratorState) === true)
 		return editor;
 

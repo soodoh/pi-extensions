@@ -9,7 +9,6 @@ import {
 	type Model,
 	type UserMessage,
 } from "@mariozechner/pi-ai";
-import type { ExtensionContext } from "@mariozechner/pi-coding-agent";
 import type { Logger } from "../../app/ports/logger";
 import type {
 	ModelClient,
@@ -48,8 +47,30 @@ const CLAUDE_BRIDGE_STREAM_SIMPLE_KEY = Symbol.for(
 	"claude-bridge:activeStreamSimple",
 );
 
+interface ModelRegistryLike {
+	getAll(): Model<string>[];
+	getApiKeyAndHeaders?: (
+		model: Model<string>,
+	) => Promise<
+		| { ok: true; apiKey?: string; headers?: Record<string, string> }
+		| { ok: false; error: string }
+	>;
+	getApiKey?: (model: Model<string>) => Promise<string | undefined>;
+}
+
+interface UiLike {
+	notify(message: string, level?: string): void;
+}
+
+interface ExtensionContextLike {
+	model?: Model<string>;
+	modelRegistry: ModelRegistryLike;
+	hasUI?: boolean;
+	ui: UiLike;
+}
+
 export interface RuntimeContextProvider {
-	getContext(): ExtensionContext | undefined;
+	getContext(): ExtensionContextLike | undefined;
 }
 
 interface CompletePromptOptions {
@@ -79,7 +100,7 @@ interface CompletionResponseLike {
 }
 
 type StreamSimpleLike = (
-	model: Model<any>,
+	model: Model<string>,
 	context: { systemPrompt: string; messages: Message[] },
 	options: {
 		apiKey?: string;
@@ -121,7 +142,7 @@ class SeederRunError extends Error {
 class UnsupportedProviderError extends Error {
 	public constructor(
 		public readonly providerApi: string,
-		public readonly model: Model<any>,
+		public readonly model: Model<string>,
 		public readonly configuredModelRef: string | undefined,
 		public readonly invocationKind: "suggestion" | "seed",
 	) {
@@ -390,13 +411,26 @@ function parseSeederFinalResponse(text: string): Record<string, unknown> {
 	return response.seed;
 }
 
-function globToRegExp(glob: string): RegExp {
-	const escaped = glob
-		.replace(/[.+^${}()|[\]\\]/g, "\\$&")
-		.replace(/\*\*/g, "::DOUBLE_STAR::")
-		.replace(/\*/g, "[^/]*")
-		.replace(/::DOUBLE_STAR::/g, ".*");
-	return new RegExp(`^${escaped}$`, "i");
+export function globToRegExp(glob: string): RegExp {
+	let pattern = "";
+	for (let index = 0; index < glob.length; index += 1) {
+		const char = glob[index];
+		if (char === "*") {
+			if (glob[index + 1] === "*") {
+				pattern += ".*";
+				index += 1;
+			} else {
+				pattern += "[^/]*";
+			}
+			continue;
+		}
+		if (char === "?") {
+			pattern += "[^/]";
+			continue;
+		}
+		pattern += char.replace(/[.+^${}()|[\]\\]/g, "\\$&");
+	}
+	return new RegExp(`^${pattern}$`, "i");
 }
 
 function validateSeedCoverage(draft: SeedDraft): {
@@ -447,7 +481,7 @@ export class PiModelClient implements ModelClient {
 		private readonly logger?: Logger,
 		cwd: string = process.cwd(),
 	) {
-		this.cwd = cwd;
+		this.cwd = path.resolve(cwd);
 	}
 
 	public async generateSeed(input: {
@@ -677,10 +711,10 @@ export class PiModelClient implements ModelClient {
 		debugMeta?: Record<string, unknown>,
 		options?: CompletePromptOptions,
 	): Promise<{ text: string; usage?: SuggestionUsage }> {
-		let model: Model<any>;
+		let model: Model<string>;
 		let apiKey: string | undefined;
 		let headers: Record<string, string> | undefined;
-		let activeContext: ExtensionContext | undefined;
+		let activeContext: ExtensionContextLike | undefined;
 		try {
 			const ctx = this.runtime.getContext();
 			if (!ctx?.model) {
@@ -772,7 +806,7 @@ export class PiModelClient implements ModelClient {
 	}
 
 	private async invokeModel(
-		model: Model<any>,
+		model: Model<string>,
 		context: { systemPrompt: string; messages: Message[] },
 		options: {
 			apiKey?: string;
@@ -831,7 +865,7 @@ export class PiModelClient implements ModelClient {
 
 	private warnUnsupportedProviderOnce(
 		error: UnsupportedProviderError,
-		ctx: ExtensionContext,
+		ctx: ExtensionContextLike,
 	): void {
 		const configuredModelRef =
 			error.configuredModelRef?.trim() || "session-default";
@@ -861,15 +895,15 @@ export class PiModelClient implements ModelClient {
 	}
 
 	private async resolveRequestAuth(
-		model: Model<any>,
+		model: Model<string>,
 		modelRegistry: {
 			getApiKeyAndHeaders?: (
-				model: Model<any>,
+				model: Model<string>,
 			) => Promise<
 				| { ok: true; apiKey?: string; headers?: Record<string, string> }
 				| { ok: false; error: string }
 			>;
-			getApiKey?: (model: Model<any>) => Promise<string | undefined>;
+			getApiKey?: (model: Model<string>) => Promise<string | undefined>;
 		},
 	): Promise<{ apiKey?: string; headers?: Record<string, string> }> {
 		if (typeof modelRegistry.getApiKeyAndHeaders === "function") {
@@ -889,10 +923,10 @@ export class PiModelClient implements ModelClient {
 	}
 
 	private resolveModelForCall(
-		currentModel: Model<any>,
+		currentModel: Model<string>,
 		modelRef: string | undefined,
-		allModels: Model<any>[],
-	): Model<any> {
+		allModels: Model<string>[],
+	): Model<string> {
 		const normalized = (modelRef ?? "").trim();
 		if (!normalized) return currentModel;
 		if (normalized.includes("/")) {
@@ -932,16 +966,25 @@ export class PiModelClient implements ModelClient {
 		}
 	}
 
-	private resolvePath(inputPath: unknown): string {
+	private async resolvePath(inputPath: unknown): Promise<string> {
 		const value =
 			typeof inputPath === "string" && inputPath.trim().length > 0
 				? inputPath.trim()
 				: ".";
 		const clean = value.replace(/^@/, "");
 		const absolute = path.resolve(this.cwd, clean);
+		const relativePath = path.relative(this.cwd, absolute);
+		if (relativePath.startsWith("..") || path.isAbsolute(relativePath)) {
+			throw new Error(`Path escapes repository root: ${value}`);
+		}
+		const [realRoot, realAbsolute] = await Promise.all([
+			fs.realpath(this.cwd),
+			fs.realpath(absolute),
+		]);
+		const realRelativePath = path.relative(realRoot, realAbsolute);
 		if (
-			absolute !== this.cwd &&
-			!absolute.startsWith(`${this.cwd}${path.sep}`)
+			realRelativePath.startsWith("..") ||
+			path.isAbsolute(realRelativePath)
 		) {
 			throw new Error(`Path escapes repository root: ${value}`);
 		}
@@ -949,7 +992,7 @@ export class PiModelClient implements ModelClient {
 	}
 
 	private async toolLs(args: Record<string, unknown>): Promise<string> {
-		const absolute = this.resolvePath(args.path);
+		const absolute = await this.resolvePath(args.path);
 		const limit = Math.min(500, Math.max(1, Number(args.limit ?? 200)));
 		const entries = await fs.readdir(absolute, { withFileTypes: true });
 		const lines = entries
@@ -963,7 +1006,7 @@ export class PiModelClient implements ModelClient {
 	}
 
 	private async toolFind(args: Record<string, unknown>): Promise<string> {
-		const absolute = this.resolvePath(args.path);
+		const absolute = await this.resolvePath(args.path);
 		const pattern = String(args.pattern ?? "").trim();
 		if (!pattern) throw new Error("find requires pattern");
 		const limit = Math.min(500, Math.max(1, Number(args.limit ?? 200)));
@@ -994,7 +1037,7 @@ export class PiModelClient implements ModelClient {
 	}
 
 	private async toolGrep(args: Record<string, unknown>): Promise<string> {
-		const searchPath = this.resolvePath(args.path);
+		const searchPath = await this.resolvePath(args.path);
 		const pattern = String(args.pattern ?? "").trim();
 		if (!pattern) throw new Error("grep requires pattern");
 		const limit = Math.min(200, Math.max(1, Number(args.limit ?? 80)));
@@ -1035,7 +1078,7 @@ export class PiModelClient implements ModelClient {
 	}
 
 	private async toolRead(args: Record<string, unknown>): Promise<string> {
-		const absolute = this.resolvePath(args.path);
+		const absolute = await this.resolvePath(args.path);
 		const offset = Math.max(1, Number(args.offset ?? 1));
 		const limit = Math.min(1200, Math.max(1, Number(args.limit ?? 220)));
 		const raw = await fs.readFile(absolute, "utf8");

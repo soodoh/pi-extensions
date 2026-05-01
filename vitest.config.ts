@@ -9,8 +9,6 @@ export default defineConfig({
 				"**/node_modules/**",
 				"coverage/**",
 				"packages/**/index.ts",
-				"packages/statusline/**",
-				"packages/workflows/**",
 			],
 			include: [
 				"packages/prompt-suggester/src/app/services/suggestion-engine.ts",
@@ -18,6 +16,8 @@ export default defineConfig({
 				"packages/prompt-suggester/src/domain/usage.ts",
 				"packages/prompt-suggester/src/infra/pi/ghost-accept-keys.ts",
 				"packages/shared-prompt-history/history-store.ts",
+				"packages/statusline/src/index.ts",
+				"packages/workflows/src/utils.ts",
 			],
 			provider: "v8",
 			reporter: ["text", "html", "lcov"],

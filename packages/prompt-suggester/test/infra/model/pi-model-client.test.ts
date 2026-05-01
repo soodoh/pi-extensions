@@ -1,7 +1,14 @@
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
+import type { Model, SimpleStreamOptions } from "@mariozechner/pi-ai";
 import { expect, test } from "vitest";
-import { PiModelClient } from "../../../src/infra/model/pi-model-client";
+import type { Logger } from "../../../src/app/ports/logger";
+import type { SuggestionPromptContext } from "../../../src/app/services/prompt-context-builder";
+import {
+	globToRegExp,
+	PiModelClient,
+	type RuntimeContextProvider,
+} from "../../../src/infra/model/pi-model-client";
 
 const { registerApiProvider, unregisterApiProviders } = await import(
 	pathToFileURL(
@@ -16,16 +23,33 @@ const CLAUDE_BRIDGE_STREAM_SIMPLE_KEY = Symbol.for(
 	"claude-bridge:activeStreamSimple",
 );
 
-function createClient() {
-	return new PiModelClient({
-		getContext() {
-			return undefined;
-		},
-	});
-}
+type TestModel = Model<string>;
+type AuthResult =
+	| { ok: true; apiKey?: string; headers?: Record<string, string> }
+	| { ok: false; error: string };
+type CompletionResponse = {
+	content: Array<{ type: "text"; text: string }>;
+	usage: {
+		input: number;
+		output: number;
+		cacheRead: number;
+		cacheWrite: number;
+		totalTokens: number;
+		cost: { total: number };
+	};
+};
 
-function createRuntimeWithModel(model, overrides = {}) {
-	const notify = overrides.notify ?? (() => {});
+type RuntimeOverrides = {
+	hasUI?: boolean;
+	notify?: (message: string, level?: string) => void;
+	getApiKeyAndHeaders?: (model: TestModel) => Promise<AuthResult>;
+};
+
+function createRuntimeWithModel(
+	model: TestModel,
+	overrides: RuntimeOverrides = {},
+): RuntimeContextProvider {
+	const notify = overrides.notify ?? (() => undefined);
 	return {
 		getContext() {
 			return {
@@ -34,9 +58,11 @@ function createRuntimeWithModel(model, overrides = {}) {
 					getAll() {
 						return [model];
 					},
-					async getApiKeyAndHeaders(requestedModel) {
+					async getApiKeyAndHeaders(requestedModel: TestModel) {
 						expect(requestedModel).toBe(model);
-						return { ok: true };
+						return overrides.getApiKeyAndHeaders
+							? await overrides.getApiKeyAndHeaders(requestedModel)
+							: { ok: true };
 					},
 				},
 				hasUI: overrides.hasUI ?? false,
@@ -46,7 +72,7 @@ function createRuntimeWithModel(model, overrides = {}) {
 	};
 }
 
-function createSuggestionContext() {
+function createSuggestionContext(): SuggestionPromptContext {
 	return {
 		latestAssistantTurn: "I can do that.",
 		turnStatus: "success",
@@ -62,7 +88,39 @@ function createSuggestionContext() {
 	};
 }
 
-function registerTestProvider(response) {
+function createModel(api: string, provider = "test"): TestModel {
+	return {
+		api,
+		provider,
+		id: "model-1",
+		name: "model-1",
+		baseUrl: "http://localhost",
+		reasoning: false,
+		input: ["text"],
+		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+		contextWindow: 1000,
+		maxTokens: 1000,
+	};
+}
+
+function successResponse(text: string): CompletionResponse {
+	return {
+		content: [{ type: "text", text }],
+		usage: {
+			input: 1,
+			output: text.trim() ? 1 : 0,
+			cacheRead: 0,
+			cacheWrite: 0,
+			totalTokens: 1,
+			cost: { total: 0 },
+		},
+	};
+}
+
+function registerTestProvider(
+	response: CompletionResponse,
+	onOptions?: (options: SimpleStreamOptions | undefined) => void,
+) {
 	const api = `test-api-${Math.random().toString(36).slice(2)}`;
 	const sourceId = `test-provider-${Math.random().toString(36).slice(2)}`;
 	registerApiProvider(
@@ -71,7 +129,12 @@ function registerTestProvider(response) {
 			stream() {
 				throw new Error("stream should not be used in these tests");
 			},
-			streamSimple() {
+			streamSimple(
+				_model: TestModel,
+				_context: unknown,
+				options?: SimpleStreamOptions,
+			) {
+				onOptions?.(options);
 				return {
 					async result() {
 						return response;
@@ -83,102 +146,119 @@ function registerTestProvider(response) {
 	);
 	return {
 		sourceId,
-		model: {
-			api,
-			provider: "test",
-			id: "model-1",
-			name: "model-1",
-			baseUrl: "http://localhost",
-			reasoning: false,
-			input: ["text"],
-			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-			contextWindow: 1000,
-			maxTokens: 1000,
-		},
+		model: createModel(api),
 		unregister() {
 			unregisterApiProviders(sourceId);
 		},
 	};
 }
 
-const model = { provider: "openai", id: "gpt-5" };
+test("globToRegExp supports single-character ? wildcards", () => {
+	const matcher = globToRegExp("src/file?.ts");
+	expect(matcher.test("src/file1.ts")).toBe(true);
+	expect(matcher.test("src/fileA.ts")).toBe(true);
+	expect(matcher.test("src/file10.ts")).toBe(false);
+	expect(matcher.test("src/file/.ts")).toBe(false);
+});
 
-test("PiModelClient resolves auth via getApiKeyAndHeaders when available", async () => {
-	const client = createClient();
-	const auth = await client.resolveRequestAuth(model, {
-		async getApiKeyAndHeaders(requestedModel) {
-			expect(requestedModel).toBe(model);
+test("PiModelClient resolves auth via getApiKeyAndHeaders when available", async (t) => {
+	let observedOptions: SimpleStreamOptions | undefined;
+	const provider = registerTestProvider(successResponse("ok"), (options) => {
+		observedOptions = options;
+	});
+	t.onTestFinished(() => provider.unregister());
+	const client = new PiModelClient(
+		createRuntimeWithModel(provider.model, {
+			async getApiKeyAndHeaders() {
+				return {
+					ok: true,
+					apiKey: "token-123",
+					headers: { "x-test": "1" },
+				};
+			},
+		}),
+	);
+
+	await client.generateSuggestion(createSuggestionContext());
+
+	expect(observedOptions?.apiKey).toBe("token-123");
+	expect(observedOptions?.headers).toEqual({ "x-test": "1" });
+});
+
+test("PiModelClient accepts header-only auth results from getApiKeyAndHeaders", async (t) => {
+	let observedOptions: SimpleStreamOptions | undefined;
+	const provider = registerTestProvider(successResponse("ok"), (options) => {
+		observedOptions = options;
+	});
+	t.onTestFinished(() => provider.unregister());
+	const client = new PiModelClient(
+		createRuntimeWithModel(provider.model, {
+			async getApiKeyAndHeaders() {
+				return {
+					ok: true,
+					headers: { Authorization: "Bearer delegated" },
+				};
+			},
+		}),
+	);
+
+	await client.generateSuggestion(createSuggestionContext());
+
+	expect(observedOptions?.apiKey).toBeUndefined();
+	expect(observedOptions?.headers).toEqual({
+		Authorization: "Bearer delegated",
+	});
+});
+
+test("PiModelClient falls back to getApiKey for older ModelRegistry versions", async (t) => {
+	let observedOptions: SimpleStreamOptions | undefined;
+	const provider = registerTestProvider(successResponse("ok"), (options) => {
+		observedOptions = options;
+	});
+	t.onTestFinished(() => provider.unregister());
+	const model = provider.model;
+	const client = new PiModelClient({
+		getContext() {
 			return {
-				ok: true,
-				apiKey: "token-123",
-				headers: { "x-test": "1" },
+				model,
+				modelRegistry: {
+					getAll() {
+						return [model];
+					},
+					async getApiKey(requestedModel: TestModel) {
+						expect(requestedModel).toBe(model);
+						return "legacy-token";
+					},
+				},
+				hasUI: false,
+				ui: { notify() {} },
 			};
 		},
-		async getApiKey() {
-			throw new Error("fallback should not be used");
-		},
 	});
 
-	expect(auth).toEqual({
-		apiKey: "token-123",
-		headers: { "x-test": "1" },
-	});
+	await client.generateSuggestion(createSuggestionContext());
+
+	expect(observedOptions?.apiKey).toBe("legacy-token");
 });
 
-test("PiModelClient accepts header-only auth results from getApiKeyAndHeaders", async () => {
-	const client = createClient();
-	const auth = await client.resolveRequestAuth(model, {
-		async getApiKeyAndHeaders() {
-			return {
-				ok: true,
-				headers: { Authorization: "Bearer delegated" },
-			};
-		},
-	});
-
-	expect(auth).toEqual({
-		apiKey: undefined,
-		headers: { Authorization: "Bearer delegated" },
-	});
-});
-
-test("PiModelClient falls back to getApiKey for older ModelRegistry versions", async () => {
-	const client = createClient();
-	const auth = await client.resolveRequestAuth(model, {
-		async getApiKey(requestedModel) {
-			expect(requestedModel).toBe(model);
-			return "legacy-token";
-		},
-	});
-
-	expect(auth).toEqual({
-		apiKey: "legacy-token",
-	});
-});
-
-test("PiModelClient surfaces ModelRegistry auth errors", async () => {
-	const client = createClient();
-	await expect(
-		client.resolveRequestAuth(model, {
+test("PiModelClient surfaces ModelRegistry auth errors", async (t) => {
+	const provider = registerTestProvider(successResponse("ok"));
+	t.onTestFinished(() => provider.unregister());
+	const client = new PiModelClient(
+		createRuntimeWithModel(provider.model, {
 			async getApiKeyAndHeaders() {
 				return { ok: false, error: "missing auth" };
 			},
 		}),
+	);
+
+	await expect(
+		client.generateSuggestion(createSuggestionContext()),
 	).rejects.toThrow(/missing auth/);
 });
 
 test("PiModelClient allows empty text for suggestions", async (t) => {
-	const provider = registerTestProvider({
-		content: [{ type: "text", text: "   " }],
-		usage: {
-			input: 1,
-			output: 0,
-			cacheRead: 0,
-			cacheWrite: 0,
-			totalTokens: 1,
-			cost: { total: 0 },
-		},
-	});
+	const provider = registerTestProvider(successResponse("   "));
 	t.onTestFinished(() => provider.unregister());
 	const client = new PiModelClient(createRuntimeWithModel(provider.model));
 
@@ -189,59 +269,36 @@ test("PiModelClient allows empty text for suggestions", async (t) => {
 });
 
 test("PiModelClient uses claude-bridge global shim when local provider registry cannot resolve it", async (t) => {
-	const bridgeModel = {
-		api: "claude-bridge",
-		provider: "claude-bridge",
-		id: "opus",
-		name: "opus",
-		baseUrl: "claude-bridge",
-		reasoning: true,
-		input: ["text"],
-		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-		contextWindow: 1000,
-		maxTokens: 1000,
-	};
-	globalThis[CLAUDE_BRIDGE_STREAM_SIMPLE_KEY] = () => ({
+	const bridgeModel = createModel("claude-bridge", "claude-bridge");
+	Reflect.set(globalThis, CLAUDE_BRIDGE_STREAM_SIMPLE_KEY, () => ({
 		async result() {
-			return {
-				content: [{ type: "text", text: "Use the test shim." }],
-				usage: {
-					input: 2,
-					output: 3,
-					cacheRead: 0,
-					cacheWrite: 0,
-					totalTokens: 5,
-					cost: { total: 0 },
-				},
-			};
+			return successResponse("Use the test shim.");
 		},
-	});
+	}));
 	t.onTestFinished(() => {
-		globalThis[CLAUDE_BRIDGE_STREAM_SIMPLE_KEY] = undefined;
+		Reflect.deleteProperty(globalThis, CLAUDE_BRIDGE_STREAM_SIMPLE_KEY);
 	});
 	const client = new PiModelClient(createRuntimeWithModel(bridgeModel));
 
 	const result = await client.generateSuggestion(createSuggestionContext());
 
 	expect(result.text).toBe("Use the test shim.");
-	expect(result.usage?.totalTokens).toBe(5);
+	expect(result.usage?.totalTokens).toBe(1);
 });
 
 test("PiModelClient degrades unsupported providers to empty suggestions and warns once", async () => {
-	const unsupportedModel = {
-		api: "custom-bridge",
-		provider: "custom",
-		id: "model-1",
-		name: "model-1",
-		baseUrl: "custom-bridge",
-		reasoning: false,
-		input: ["text"],
-		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-		contextWindow: 1000,
-		maxTokens: 1000,
+	const unsupportedModel = createModel("custom-bridge", "custom");
+	const warnings: Array<{ message: string; meta?: Record<string, unknown> }> =
+		[];
+	const notifications: Array<{ message: string; level?: string }> = [];
+	const logger: Logger = {
+		debug() {},
+		info() {},
+		warn(message, meta) {
+			warnings.push({ message, meta });
+		},
+		error() {},
 	};
-	const warnings = [];
-	const notifications = [];
 	const client = new PiModelClient(
 		createRuntimeWithModel(unsupportedModel, {
 			hasUI: true,
@@ -249,14 +306,7 @@ test("PiModelClient degrades unsupported providers to empty suggestions and warn
 				notifications.push({ message, level });
 			},
 		}),
-		{
-			debug() {},
-			info() {},
-			warn(message, meta) {
-				warnings.push({ message, meta });
-			},
-			error() {},
-		},
+		logger,
 	);
 
 	const first = await client.generateSuggestion(createSuggestionContext());
@@ -271,18 +321,7 @@ test("PiModelClient degrades unsupported providers to empty suggestions and warn
 });
 
 test("PiModelClient fails clearly for unsupported seeder providers", async () => {
-	const unsupportedModel = {
-		api: "custom-bridge",
-		provider: "custom",
-		id: "model-1",
-		name: "model-1",
-		baseUrl: "custom-bridge",
-		reasoning: false,
-		input: ["text"],
-		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-		contextWindow: 1000,
-		maxTokens: 1000,
-	};
+	const unsupportedModel = createModel("custom-bridge", "custom");
 	const client = new PiModelClient(createRuntimeWithModel(unsupportedModel));
 
 	await expect(
@@ -294,17 +333,7 @@ test("PiModelClient fails clearly for unsupported seeder providers", async () =>
 });
 
 test("PiModelClient still rejects empty text for seeder", async (t) => {
-	const provider = registerTestProvider({
-		content: [{ type: "text", text: "   " }],
-		usage: {
-			input: 1,
-			output: 0,
-			cacheRead: 0,
-			cacheWrite: 0,
-			totalTokens: 1,
-			cost: { total: 0 },
-		},
-	});
+	const provider = registerTestProvider(successResponse("   "));
 	t.onTestFinished(() => provider.unregister());
 	const client = new PiModelClient(createRuntimeWithModel(provider.model));
 

@@ -1,13 +1,22 @@
 import { expect, test } from "vitest";
 import { TurnEndOrchestrator } from "../../src/app/orchestrators/turn-end";
+import type { PromptSuggesterConfig } from "../../src/config/types";
 import {
 	INITIAL_RUNTIME_STATE,
 	type RuntimeState,
 } from "../../src/domain/state";
+import type { SuggestionUsage } from "../../src/domain/suggestion";
 
-function createConfig() {
+type UsageCall = { kind: "suggester" | "seeder"; usage: SuggestionUsage };
+type LogEvent = {
+	level: string;
+	message: string;
+	meta?: Record<string, unknown>;
+};
+
+function createConfig(): PromptSuggesterConfig {
 	return {
-		schemaVersion: 7,
+		schemaVersion: 8,
 		seed: { maxDiffChars: 3000 },
 		reseed: {
 			enabled: true,
@@ -19,6 +28,8 @@ function createConfig() {
 			noSuggestionToken: "[no suggestion]",
 			customInstruction: "",
 			fastPathContinueOnError: true,
+			ghostAcceptKeys: ["right"],
+			ghostAcceptAndSendKeys: ["enter"],
 			maxAssistantTurnChars: 100000,
 			maxRecentUserPrompts: 20,
 			maxRecentUserPromptChars: 500,
@@ -29,6 +40,8 @@ function createConfig() {
 			maxAbortContextChars: 280,
 			maxSuggestionChars: 200,
 			prefillOnlyWhenEditorEmpty: true,
+			showUsageInPanel: true,
+			showPanelStatus: true,
 			strategy: "transcript-steering",
 			transcriptMaxContextPercent: 70,
 			transcriptMaxMessages: 120,
@@ -52,10 +65,10 @@ function createConfig() {
 
 test("TurnEndOrchestrator records usage and persists transcript-steering suggestion metadata", async () => {
 	let savedState: RuntimeState | undefined;
-	const usageCalls = [];
-	const shown = [];
-	const logEvents = [];
-	const baseState = {
+	const usageCalls: UsageCall[] = [];
+	const shown: string[] = [];
+	const logEvents: LogEvent[] = [];
+	const baseState: RuntimeState = {
 		...INITIAL_RUNTIME_STATE,
 		pendingNextTurnObservation: {
 			suggestionTurnId: "prev-turn",
@@ -177,7 +190,7 @@ test("TurnEndOrchestrator records usage and persists transcript-steering suggest
 		logEvents.some(
 			(entry) =>
 				entry.message === "suggestion.generated" &&
-				entry.meta.variantName === "default",
+				entry.meta?.variantName === "default",
 		),
 	).toBe(true);
 });

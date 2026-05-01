@@ -1033,29 +1033,31 @@ async function fetchProviderUsage(
 	};
 
 	if (target.authKind === "oauth") {
-		const token = await getProviderToken(ctx, target.providerId);
-		if (!token) return { ...statusBase, state: "unknown" };
-
 		let scope: ProviderUsageScope | undefined;
-		if (target.providerId === "anthropic") {
-			scope = await fetchAnthropicOAuthUsage(token);
-		} else if (target.providerId === "openai-codex") {
-			scope = await fetchOpenAiCodexUsage(token);
-		} else if (target.providerId === "github-copilot") {
+		if (target.providerId === "github-copilot") {
 			const githubToken = await getGitHubCopilotUserToken(ctx);
 			scope = githubToken
 				? await fetchGitHubCopilotUsage(githubToken)
 				: undefined;
-		} else if (
-			target.providerId === "google-gemini-cli" ||
-			target.providerId === "google-antigravity"
-		) {
-			const googleCredential = parseGoogleOAuthToken(token);
-			scope = googleCredential
-				? await fetchGoogleCloudQuota(googleCredential)
-				: undefined;
 		} else {
-			return { ...statusBase, state: "unsupported" };
+			const token = await getProviderToken(ctx, target.providerId);
+			if (!token) return { ...statusBase, state: "unknown" };
+
+			if (target.providerId === "anthropic") {
+				scope = await fetchAnthropicOAuthUsage(token);
+			} else if (target.providerId === "openai-codex") {
+				scope = await fetchOpenAiCodexUsage(token);
+			} else if (
+				target.providerId === "google-gemini-cli" ||
+				target.providerId === "google-antigravity"
+			) {
+				const googleCredential = parseGoogleOAuthToken(token);
+				scope = googleCredential
+					? await fetchGoogleCloudQuota(googleCredential)
+					: undefined;
+			} else {
+				return { ...statusBase, state: "unsupported" };
+			}
 		}
 
 		return scope

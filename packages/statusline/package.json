@@ -16,7 +16,7 @@
 	},
 	"scripts": {
 		"build": "tsc --noEmit",
-		"test": "vitest run --root ../.. packages/statusline --passWithNoTests",
+		"test": "vitest run --root ../.. packages/statusline",
 		"typecheck": "tsc --noEmit"
 	}
 }

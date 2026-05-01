@@ -44,7 +44,10 @@ test("PiSessionTranscriptProvider prefers the session manager's effective contex
 	const transcript = provider.getActiveTranscript();
 	expect(transcript?.systemPrompt).toBe("system prompt");
 	expect(transcript?.messages.length).toBe(1);
-	expect(transcript?.messages[0].content[0].text).toBe("effective context");
+	const content = transcript?.messages[0].content[0];
+	expect(
+		typeof content === "object" && content.type === "text" ? content.text : "",
+	).toBe("effective context");
 	expect(transcript?.contextUsagePercent).toBe(10);
 	expect(transcript?.sessionId).toBe("session-1");
 });

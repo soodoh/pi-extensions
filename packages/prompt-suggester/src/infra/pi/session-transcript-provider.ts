@@ -5,10 +5,20 @@ import {
 	type SessionEntry,
 } from "@mariozechner/pi-coding-agent";
 import type { SessionTranscriptProvider } from "../../app/ports/session-transcript";
-import type { RuntimeContextProvider } from "../model/pi-model-client";
 
-function cloneMessages(messages: Message[]): Message[] {
-	return JSON.parse(JSON.stringify(messages)) as Message[];
+function isMessage(value: unknown): value is Message {
+	return (
+		typeof value === "object" &&
+		value !== null &&
+		"role" in value &&
+		(value.role === "user" ||
+			value.role === "assistant" ||
+			value.role === "toolResult")
+	);
+}
+
+function cloneMessages(messages: unknown[]): Message[] {
+	return structuredClone(messages.filter(isMessage));
 }
 
 type SessionManagerWithContext = {
@@ -18,6 +28,16 @@ type SessionManagerWithContext = {
 	buildSessionContext?: () => SessionContext;
 };
 
+type RuntimeContextLike = {
+	sessionManager: SessionManagerWithContext;
+	getSystemPrompt(): string;
+	getContextUsage?(): { percent: number | null } | undefined;
+};
+
+type RuntimeContextProvider = {
+	getContext(): RuntimeContextLike | undefined;
+};
+
 export class PiSessionTranscriptProvider implements SessionTranscriptProvider {
 	public constructor(private readonly runtime: RuntimeContextProvider) {}
 
@@ -25,22 +45,20 @@ export class PiSessionTranscriptProvider implements SessionTranscriptProvider {
 		const ctx = this.runtime.getContext();
 		if (!ctx) return undefined;
 		try {
-			const sessionManager = ctx.sessionManager as SessionManagerWithContext;
+			const sessionManager = ctx.sessionManager;
 			const transcript =
 				typeof sessionManager.buildSessionContext === "function"
 					? sessionManager.buildSessionContext()
 					: buildSessionContext(
-							ctx.sessionManager.getBranch(
-								ctx.sessionManager.getLeafId() ?? undefined,
-							) as SessionEntry[],
-							ctx.sessionManager.getLeafId() ?? undefined,
+							sessionManager.getBranch(sessionManager.getLeafId() ?? undefined),
+							sessionManager.getLeafId() ?? undefined,
 						);
 			const systemPrompt = ctx.getSystemPrompt().trim();
 			if (!systemPrompt) return undefined;
 			return {
 				systemPrompt,
-				messages: cloneMessages(transcript.messages as Message[]),
-				contextUsagePercent: ctx.getContextUsage()?.percent ?? undefined,
+				messages: cloneMessages(transcript.messages),
+				contextUsagePercent: ctx.getContextUsage?.()?.percent ?? undefined,
 				sessionId: ctx.sessionManager.getSessionId(),
 			};
 		} catch {

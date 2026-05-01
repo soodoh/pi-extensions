@@ -1,6 +1,7 @@
+import { type Static, type TSchema, Type } from "typebox";
+import { Value } from "typebox/value";
 import { CURRENT_CONFIG_SCHEMA_VERSION } from "./migrations";
 import type {
-	GhostAcceptKey,
 	InferenceConfig,
 	LoggingConfig,
 	PromptSuggesterConfig,
@@ -10,307 +11,510 @@ import type {
 	SuggestionConfig,
 } from "./types";
 
-function isObject(value: unknown): value is Record<string, unknown> {
-	return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function isBoolean(value: unknown): value is boolean {
-	return typeof value === "boolean";
-}
-
-function isPositiveInteger(value: unknown): boolean {
-	return typeof value === "number" && Number.isInteger(value) && value > 0;
-}
-
-function isNonNegativeInteger(value: unknown): boolean {
-	return typeof value === "number" && Number.isInteger(value) && value >= 0;
-}
-
-function isPositiveNumber(value: unknown): boolean {
-	return typeof value === "number" && Number.isFinite(value) && value > 0;
-}
-
-function isPercentageInteger(value: unknown): boolean {
-	return (
-		typeof value === "number" &&
-		Number.isInteger(value) &&
-		value >= 0 &&
-		value <= 100
-	);
-}
-
-function isPositivePercentageInteger(value: unknown): boolean {
-	return (
-		typeof value === "number" &&
-		Number.isInteger(value) &&
-		value > 0 &&
-		value <= 100
-	);
-}
-
-function isThinkingLevel(value: unknown): boolean {
-	return [
-		"minimal",
-		"low",
-		"medium",
-		"high",
-		"xhigh",
-		"session-default",
-	].includes(String(value));
-}
-
-function isModelSetting(value: unknown): boolean {
-	return typeof value === "string" && value.trim().length > 0;
-}
-
-function isSuggestionStrategy(value: unknown): boolean {
-	return ["compact", "transcript-steering"].includes(String(value));
-}
-
-function isGhostAcceptKey(value: unknown): value is GhostAcceptKey {
-	return ["space", "right", "enter"].includes(String(value));
-}
-
-function isGhostAcceptKeys(value: unknown): value is GhostAcceptKey[] {
-	return (
-		Array.isArray(value) &&
-		value.length > 0 &&
-		value.every((entry) => isGhostAcceptKey(entry)) &&
-		new Set(value).size === value.length
-	);
-}
-
-function isSchemaVersion(value: unknown): boolean {
-	return (
-		typeof value === "number" &&
-		Number.isInteger(value) &&
-		value === CURRENT_CONFIG_SCHEMA_VERSION
-	);
-}
-
-function isLoggingLevel(value: unknown): boolean {
-	return ["debug", "info", "warn", "error"].includes(String(value));
-}
-
-type ValidatorMap<T> = {
-	[K in keyof T]: (value: unknown) => boolean;
-};
-
 interface SectionNormalizationResult<T> {
-	value: Partial<T>;
+	value: T;
 	changed: boolean;
 }
 
-const seedValidators: ValidatorMap<SeedConfig> = {
-	maxDiffChars: isPositiveInteger,
-};
-const seedShape: SeedConfig = { maxDiffChars: 1 };
+const recordSchema = Type.Record(Type.String(), Type.Unknown());
+const positiveIntegerSchema = Type.Integer({ minimum: 1 });
+const nonNegativeIntegerSchema = Type.Integer({ minimum: 0 });
+const positiveNumberSchema = Type.Number({ exclusiveMinimum: 0 });
+const percentageIntegerSchema = Type.Integer({ minimum: 0, maximum: 100 });
+const positivePercentageIntegerSchema = Type.Integer({
+	minimum: 1,
+	maximum: 100,
+});
+const nonEmptyStringSchema = Type.Refine(
+	Type.String(),
+	(value) => value.trim().length > 0,
+);
+const thinkingLevelSchema = Type.Union([
+	Type.Literal("minimal"),
+	Type.Literal("low"),
+	Type.Literal("medium"),
+	Type.Literal("high"),
+	Type.Literal("xhigh"),
+	Type.Literal("session-default"),
+]);
+const suggestionStrategySchema = Type.Union([
+	Type.Literal("compact"),
+	Type.Literal("transcript-steering"),
+]);
+const ghostAcceptKeySchema = Type.Union([
+	Type.Literal("space"),
+	Type.Literal("right"),
+	Type.Literal("enter"),
+]);
+const ghostAcceptKeysSchema = Type.Array(ghostAcceptKeySchema, {
+	minItems: 1,
+	uniqueItems: true,
+});
+const loggingLevelSchema = Type.Union([
+	Type.Literal("debug"),
+	Type.Literal("info"),
+	Type.Literal("warn"),
+	Type.Literal("error"),
+]);
 
-const reseedValidators: ValidatorMap<ReseedConfig> = {
-	enabled: isBoolean,
-	checkOnSessionStart: isBoolean,
-	checkAfterEveryTurn: isBoolean,
-	turnCheckInterval: isNonNegativeInteger,
-};
-const reseedShape: ReseedConfig = {
-	enabled: true,
-	checkOnSessionStart: true,
-	checkAfterEveryTurn: true,
-	turnCheckInterval: 0,
-};
+const seedSchema = Type.Object(
+	{
+		maxDiffChars: positiveIntegerSchema,
+	},
+	{ additionalProperties: false },
+);
 
-const suggestionValidators: ValidatorMap<SuggestionConfig> = {
-	noSuggestionToken: (value) => typeof value === "string",
-	customInstruction: (value) => typeof value === "string",
-	fastPathContinueOnError: isBoolean,
-	ghostAcceptKeys: isGhostAcceptKeys,
-	ghostAcceptAndSendKeys: isGhostAcceptKeys,
-	maxAssistantTurnChars: isPositiveInteger,
-	maxRecentUserPrompts: isPositiveInteger,
-	maxRecentUserPromptChars: isPositiveInteger,
-	maxToolSignals: isPositiveInteger,
-	maxToolSignalChars: isPositiveInteger,
-	maxTouchedFiles: isPositiveInteger,
-	maxUnresolvedQuestions: isPositiveInteger,
-	maxAbortContextChars: isPositiveInteger,
-	maxSuggestionChars: isPositiveInteger,
-	prefillOnlyWhenEditorEmpty: isBoolean,
-	showUsageInPanel: isBoolean,
-	showPanelStatus: isBoolean,
-	strategy: isSuggestionStrategy,
-	transcriptMaxContextPercent: isPositivePercentageInteger,
-	transcriptMaxMessages: isPositiveInteger,
-	transcriptMaxChars: isPositiveInteger,
-	transcriptRolloutPercent: isPercentageInteger,
-};
-const suggestionShape: SuggestionConfig = {
-	noSuggestionToken: "",
-	customInstruction: "",
-	fastPathContinueOnError: true,
-	ghostAcceptKeys: ["right"],
-	ghostAcceptAndSendKeys: ["enter"],
-	maxAssistantTurnChars: 1,
-	maxRecentUserPrompts: 1,
-	maxRecentUserPromptChars: 1,
-	maxToolSignals: 1,
-	maxToolSignalChars: 1,
-	maxTouchedFiles: 1,
-	maxUnresolvedQuestions: 1,
-	maxAbortContextChars: 1,
-	maxSuggestionChars: 1,
-	prefillOnlyWhenEditorEmpty: true,
-	showUsageInPanel: true,
-	showPanelStatus: true,
-	strategy: "compact",
-	transcriptMaxContextPercent: 1,
-	transcriptMaxMessages: 1,
-	transcriptMaxChars: 1,
-	transcriptRolloutPercent: 0,
-};
+const reseedSchema = Type.Object(
+	{
+		enabled: Type.Boolean(),
+		checkOnSessionStart: Type.Boolean(),
+		checkAfterEveryTurn: Type.Boolean(),
+		turnCheckInterval: nonNegativeIntegerSchema,
+	},
+	{ additionalProperties: false },
+);
 
-const steeringValidators: ValidatorMap<SteeringConfig> = {
-	historyWindow: isPositiveInteger,
-	acceptedThreshold: (value) =>
-		typeof value === "number" && isPositiveNumber(value) && value <= 1,
-	maxChangedExamples: isPositiveInteger,
-};
-const steeringShape: SteeringConfig = {
-	historyWindow: 1,
-	acceptedThreshold: 0.5,
-	maxChangedExamples: 1,
-};
+const suggestionSchema = Type.Object(
+	{
+		noSuggestionToken: Type.String(),
+		customInstruction: Type.String(),
+		fastPathContinueOnError: Type.Boolean(),
+		ghostAcceptKeys: ghostAcceptKeysSchema,
+		ghostAcceptAndSendKeys: ghostAcceptKeysSchema,
+		maxAssistantTurnChars: positiveIntegerSchema,
+		maxRecentUserPrompts: positiveIntegerSchema,
+		maxRecentUserPromptChars: positiveIntegerSchema,
+		maxToolSignals: positiveIntegerSchema,
+		maxToolSignalChars: positiveIntegerSchema,
+		maxTouchedFiles: positiveIntegerSchema,
+		maxUnresolvedQuestions: positiveIntegerSchema,
+		maxAbortContextChars: positiveIntegerSchema,
+		maxSuggestionChars: positiveIntegerSchema,
+		prefillOnlyWhenEditorEmpty: Type.Boolean(),
+		showUsageInPanel: Type.Boolean(),
+		showPanelStatus: Type.Boolean(),
+		strategy: suggestionStrategySchema,
+		transcriptMaxContextPercent: positivePercentageIntegerSchema,
+		transcriptMaxMessages: positiveIntegerSchema,
+		transcriptMaxChars: positiveIntegerSchema,
+		transcriptRolloutPercent: percentageIntegerSchema,
+	},
+	{ additionalProperties: false },
+);
 
-const loggingValidators: ValidatorMap<LoggingConfig> = {
-	level: isLoggingLevel,
-};
-const loggingShape: LoggingConfig = { level: "info" };
+const steeringSchema = Type.Object(
+	{
+		historyWindow: positiveIntegerSchema,
+		acceptedThreshold: Type.Intersect([
+			positiveNumberSchema,
+			Type.Number({ maximum: 1 }),
+		]),
+		maxChangedExamples: positiveIntegerSchema,
+	},
+	{ additionalProperties: false },
+);
 
-const inferenceValidators: ValidatorMap<InferenceConfig> = {
-	seederModel: isModelSetting,
-	suggesterModel: isModelSetting,
-	seederThinking: isThinkingLevel,
-	suggesterThinking: isThinkingLevel,
-};
-const inferenceShape: InferenceConfig = {
-	seederModel: "session-default",
-	suggesterModel: "session-default",
-	seederThinking: "session-default",
-	suggesterThinking: "session-default",
-};
+const loggingSchema = Type.Object(
+	{
+		level: loggingLevelSchema,
+	},
+	{ additionalProperties: false },
+);
 
-function normalizeSection<T extends object>(
+const inferenceSchema = Type.Object(
+	{
+		seederModel: nonEmptyStringSchema,
+		suggesterModel: nonEmptyStringSchema,
+		seederThinking: thinkingLevelSchema,
+		suggesterThinking: thinkingLevelSchema,
+	},
+	{ additionalProperties: false },
+);
+
+const promptSuggesterConfigSchema = Type.Object(
+	{
+		schemaVersion: Type.Literal(CURRENT_CONFIG_SCHEMA_VERSION),
+		seed: seedSchema,
+		reseed: reseedSchema,
+		suggestion: suggestionSchema,
+		steering: steeringSchema,
+		logging: loggingSchema,
+		inference: inferenceSchema,
+	},
+	{ additionalProperties: false },
+);
+
+function hasUnknownKeys(
+	source: Record<string, unknown>,
+	defaults: object,
+): boolean {
+	const supportedKeys = new Set(Object.keys(defaults));
+	return Object.keys(source).some((key) => !supportedKeys.has(key));
+}
+
+function objectSource(
 	input: unknown,
-	defaults: T,
-	validators: ValidatorMap<T>,
-): SectionNormalizationResult<T> {
-	const source = isObject(input) ? input : undefined;
-	let changed = input !== undefined && !isObject(input);
-
-	if (source) {
-		const supportedKeys = new Set(
-			Object.keys(defaults as Record<string, unknown>),
-		);
-		for (const key of Object.keys(source)) {
-			if (!supportedKeys.has(key)) {
-				changed = true;
-			}
-		}
-	}
-
-	const result: Partial<T> = {};
-	const mutableResult = result as Record<string, unknown>;
-	const defaultEntries = defaults as Record<string, unknown>;
-	for (const key of Object.keys(defaultEntries) as Array<keyof T & string>) {
-		const raw = source?.[key];
-		if (raw === undefined) {
-			mutableResult[key] = defaultEntries[key];
-			continue;
-		}
-
-		const validator = validators[key];
-		if (validator(raw)) {
-			mutableResult[key] = raw;
-		} else {
-			changed = true;
-			mutableResult[key] = defaultEntries[key];
-		}
-	}
-
+	defaults: object,
+): { source: Record<string, unknown> | undefined; changed: boolean } {
+	const source = Value.Check(recordSchema, input) ? input : undefined;
 	return {
-		value: result,
-		changed,
+		source,
+		changed:
+			(input !== undefined && !source) ||
+			(source ? hasUnknownKeys(source, defaults) : false),
 	};
 }
 
-function hasUnknownTopLevelKeys(
-	config: Record<string, unknown>,
-	defaults: PromptSuggesterConfig,
-): boolean {
-	const supportedKeys = new Set(Object.keys(defaults));
-	for (const key of Object.keys(config)) {
-		if (!supportedKeys.has(key)) return true;
-	}
-	return false;
+function normalizeProperty<const T extends TSchema>(
+	schema: T,
+	input: unknown,
+	fallback: Static<T>,
+): { value: Static<T>; changed: boolean } {
+	if (input === undefined) return { value: fallback, changed: false };
+	return Value.Check(schema, input)
+		? { value: input, changed: false }
+		: { value: fallback, changed: true };
 }
 
-function validateSection<T extends object>(
+function normalizeSeedConfig(
 	input: unknown,
-	defaults: T,
-	validators: ValidatorMap<T>,
-): input is T {
-	if (!isObject(input)) return false;
-	const supportedKeys = new Set(
-		Object.keys(defaults as Record<string, unknown>),
+	defaults: SeedConfig,
+): SectionNormalizationResult<SeedConfig> {
+	const { source, changed } = objectSource(input, defaults);
+	const maxDiffChars = normalizeProperty(
+		positiveIntegerSchema,
+		source?.maxDiffChars,
+		defaults.maxDiffChars,
 	);
-	for (const key of Object.keys(input)) {
-		if (!supportedKeys.has(key)) return false;
-	}
-	for (const key of Object.keys(defaults as Record<string, unknown>) as Array<
-		keyof T & string
-	>) {
-		if (!validators[key](input[key])) return false;
-	}
-	return true;
+	return {
+		value: { maxDiffChars: maxDiffChars.value },
+		changed: changed || maxDiffChars.changed,
+	};
+}
+
+function normalizeReseedConfig(
+	input: unknown,
+	defaults: ReseedConfig,
+): SectionNormalizationResult<ReseedConfig> {
+	const { source, changed } = objectSource(input, defaults);
+	const enabled = normalizeProperty(
+		Type.Boolean(),
+		source?.enabled,
+		defaults.enabled,
+	);
+	const checkOnSessionStart = normalizeProperty(
+		Type.Boolean(),
+		source?.checkOnSessionStart,
+		defaults.checkOnSessionStart,
+	);
+	const checkAfterEveryTurn = normalizeProperty(
+		Type.Boolean(),
+		source?.checkAfterEveryTurn,
+		defaults.checkAfterEveryTurn,
+	);
+	const turnCheckInterval = normalizeProperty(
+		nonNegativeIntegerSchema,
+		source?.turnCheckInterval,
+		defaults.turnCheckInterval,
+	);
+	return {
+		value: {
+			enabled: enabled.value,
+			checkOnSessionStart: checkOnSessionStart.value,
+			checkAfterEveryTurn: checkAfterEveryTurn.value,
+			turnCheckInterval: turnCheckInterval.value,
+		},
+		changed:
+			changed ||
+			enabled.changed ||
+			checkOnSessionStart.changed ||
+			checkAfterEveryTurn.changed ||
+			turnCheckInterval.changed,
+	};
+}
+
+function normalizeSuggestionConfig(
+	input: unknown,
+	defaults: SuggestionConfig,
+): SectionNormalizationResult<SuggestionConfig> {
+	const { source, changed } = objectSource(input, defaults);
+	const noSuggestionToken = normalizeProperty(
+		Type.String(),
+		source?.noSuggestionToken,
+		defaults.noSuggestionToken,
+	);
+	const customInstruction = normalizeProperty(
+		Type.String(),
+		source?.customInstruction,
+		defaults.customInstruction,
+	);
+	const fastPathContinueOnError = normalizeProperty(
+		Type.Boolean(),
+		source?.fastPathContinueOnError,
+		defaults.fastPathContinueOnError,
+	);
+	const ghostAcceptKeys = normalizeProperty(
+		ghostAcceptKeysSchema,
+		source?.ghostAcceptKeys,
+		defaults.ghostAcceptKeys,
+	);
+	const ghostAcceptAndSendKeys = normalizeProperty(
+		ghostAcceptKeysSchema,
+		source?.ghostAcceptAndSendKeys,
+		defaults.ghostAcceptAndSendKeys,
+	);
+	const maxAssistantTurnChars = normalizeProperty(
+		positiveIntegerSchema,
+		source?.maxAssistantTurnChars,
+		defaults.maxAssistantTurnChars,
+	);
+	const maxRecentUserPrompts = normalizeProperty(
+		positiveIntegerSchema,
+		source?.maxRecentUserPrompts,
+		defaults.maxRecentUserPrompts,
+	);
+	const maxRecentUserPromptChars = normalizeProperty(
+		positiveIntegerSchema,
+		source?.maxRecentUserPromptChars,
+		defaults.maxRecentUserPromptChars,
+	);
+	const maxToolSignals = normalizeProperty(
+		positiveIntegerSchema,
+		source?.maxToolSignals,
+		defaults.maxToolSignals,
+	);
+	const maxToolSignalChars = normalizeProperty(
+		positiveIntegerSchema,
+		source?.maxToolSignalChars,
+		defaults.maxToolSignalChars,
+	);
+	const maxTouchedFiles = normalizeProperty(
+		positiveIntegerSchema,
+		source?.maxTouchedFiles,
+		defaults.maxTouchedFiles,
+	);
+	const maxUnresolvedQuestions = normalizeProperty(
+		positiveIntegerSchema,
+		source?.maxUnresolvedQuestions,
+		defaults.maxUnresolvedQuestions,
+	);
+	const maxAbortContextChars = normalizeProperty(
+		positiveIntegerSchema,
+		source?.maxAbortContextChars,
+		defaults.maxAbortContextChars,
+	);
+	const maxSuggestionChars = normalizeProperty(
+		positiveIntegerSchema,
+		source?.maxSuggestionChars,
+		defaults.maxSuggestionChars,
+	);
+	const prefillOnlyWhenEditorEmpty = normalizeProperty(
+		Type.Boolean(),
+		source?.prefillOnlyWhenEditorEmpty,
+		defaults.prefillOnlyWhenEditorEmpty,
+	);
+	const showUsageInPanel = normalizeProperty(
+		Type.Boolean(),
+		source?.showUsageInPanel,
+		defaults.showUsageInPanel,
+	);
+	const showPanelStatus = normalizeProperty(
+		Type.Boolean(),
+		source?.showPanelStatus,
+		defaults.showPanelStatus,
+	);
+	const strategy = normalizeProperty(
+		suggestionStrategySchema,
+		source?.strategy,
+		defaults.strategy,
+	);
+	const transcriptMaxContextPercent = normalizeProperty(
+		positivePercentageIntegerSchema,
+		source?.transcriptMaxContextPercent,
+		defaults.transcriptMaxContextPercent,
+	);
+	const transcriptMaxMessages = normalizeProperty(
+		positiveIntegerSchema,
+		source?.transcriptMaxMessages,
+		defaults.transcriptMaxMessages,
+	);
+	const transcriptMaxChars = normalizeProperty(
+		positiveIntegerSchema,
+		source?.transcriptMaxChars,
+		defaults.transcriptMaxChars,
+	);
+	const transcriptRolloutPercent = normalizeProperty(
+		percentageIntegerSchema,
+		source?.transcriptRolloutPercent,
+		defaults.transcriptRolloutPercent,
+	);
+	return {
+		value: {
+			noSuggestionToken: noSuggestionToken.value,
+			customInstruction: customInstruction.value,
+			fastPathContinueOnError: fastPathContinueOnError.value,
+			ghostAcceptKeys: ghostAcceptKeys.value,
+			ghostAcceptAndSendKeys: ghostAcceptAndSendKeys.value,
+			maxAssistantTurnChars: maxAssistantTurnChars.value,
+			maxRecentUserPrompts: maxRecentUserPrompts.value,
+			maxRecentUserPromptChars: maxRecentUserPromptChars.value,
+			maxToolSignals: maxToolSignals.value,
+			maxToolSignalChars: maxToolSignalChars.value,
+			maxTouchedFiles: maxTouchedFiles.value,
+			maxUnresolvedQuestions: maxUnresolvedQuestions.value,
+			maxAbortContextChars: maxAbortContextChars.value,
+			maxSuggestionChars: maxSuggestionChars.value,
+			prefillOnlyWhenEditorEmpty: prefillOnlyWhenEditorEmpty.value,
+			showUsageInPanel: showUsageInPanel.value,
+			showPanelStatus: showPanelStatus.value,
+			strategy: strategy.value,
+			transcriptMaxContextPercent: transcriptMaxContextPercent.value,
+			transcriptMaxMessages: transcriptMaxMessages.value,
+			transcriptMaxChars: transcriptMaxChars.value,
+			transcriptRolloutPercent: transcriptRolloutPercent.value,
+		},
+		changed:
+			changed ||
+			noSuggestionToken.changed ||
+			customInstruction.changed ||
+			fastPathContinueOnError.changed ||
+			ghostAcceptKeys.changed ||
+			ghostAcceptAndSendKeys.changed ||
+			maxAssistantTurnChars.changed ||
+			maxRecentUserPrompts.changed ||
+			maxRecentUserPromptChars.changed ||
+			maxToolSignals.changed ||
+			maxToolSignalChars.changed ||
+			maxTouchedFiles.changed ||
+			maxUnresolvedQuestions.changed ||
+			maxAbortContextChars.changed ||
+			maxSuggestionChars.changed ||
+			prefillOnlyWhenEditorEmpty.changed ||
+			showUsageInPanel.changed ||
+			showPanelStatus.changed ||
+			strategy.changed ||
+			transcriptMaxContextPercent.changed ||
+			transcriptMaxMessages.changed ||
+			transcriptMaxChars.changed ||
+			transcriptRolloutPercent.changed,
+	};
+}
+
+function normalizeSteeringConfig(
+	input: unknown,
+	defaults: SteeringConfig,
+): SectionNormalizationResult<SteeringConfig> {
+	const { source, changed } = objectSource(input, defaults);
+	const historyWindow = normalizeProperty(
+		positiveIntegerSchema,
+		source?.historyWindow,
+		defaults.historyWindow,
+	);
+	const acceptedThreshold = normalizeProperty(
+		Type.Intersect([positiveNumberSchema, Type.Number({ maximum: 1 })]),
+		source?.acceptedThreshold,
+		defaults.acceptedThreshold,
+	);
+	const maxChangedExamples = normalizeProperty(
+		positiveIntegerSchema,
+		source?.maxChangedExamples,
+		defaults.maxChangedExamples,
+	);
+	return {
+		value: {
+			historyWindow: historyWindow.value,
+			acceptedThreshold: acceptedThreshold.value,
+			maxChangedExamples: maxChangedExamples.value,
+		},
+		changed:
+			changed ||
+			historyWindow.changed ||
+			acceptedThreshold.changed ||
+			maxChangedExamples.changed,
+	};
+}
+
+function normalizeLoggingConfig(
+	input: unknown,
+	defaults: LoggingConfig,
+): SectionNormalizationResult<LoggingConfig> {
+	const { source, changed } = objectSource(input, defaults);
+	const level = normalizeProperty(
+		loggingLevelSchema,
+		source?.level,
+		defaults.level,
+	);
+	return {
+		value: { level: level.value },
+		changed: changed || level.changed,
+	};
+}
+
+function normalizeInferenceConfig(
+	input: unknown,
+	defaults: InferenceConfig,
+): SectionNormalizationResult<InferenceConfig> {
+	const { source, changed } = objectSource(input, defaults);
+	const seederModel = normalizeProperty(
+		nonEmptyStringSchema,
+		source?.seederModel,
+		defaults.seederModel,
+	);
+	const suggesterModel = normalizeProperty(
+		nonEmptyStringSchema,
+		source?.suggesterModel,
+		defaults.suggesterModel,
+	);
+	const seederThinking = normalizeProperty(
+		thinkingLevelSchema,
+		source?.seederThinking,
+		defaults.seederThinking,
+	);
+	const suggesterThinking = normalizeProperty(
+		thinkingLevelSchema,
+		source?.suggesterThinking,
+		defaults.suggesterThinking,
+	);
+	return {
+		value: {
+			seederModel: seederModel.value,
+			suggesterModel: suggesterModel.value,
+			seederThinking: seederThinking.value,
+			suggesterThinking: suggesterThinking.value,
+		},
+		changed:
+			changed ||
+			seederModel.changed ||
+			suggesterModel.changed ||
+			seederThinking.changed ||
+			suggesterThinking.changed,
+	};
 }
 
 export function normalizeConfig(
 	config: unknown,
 	defaults: PromptSuggesterConfig,
 ): { config: PromptSuggesterConfig; changed: boolean } {
-	const source = isObject(config) ? config : undefined;
-	let changed = config !== undefined && !isObject(config);
+	const source = Value.Check(recordSchema, config) ? config : undefined;
+	let changed = config !== undefined && !source;
 	if (source) {
 		changed =
 			changed ||
 			source.schemaVersion !== defaults.schemaVersion ||
-			hasUnknownTopLevelKeys(source, defaults);
+			hasUnknownKeys(source, defaults);
 	}
 
-	const seed = normalizeSection(source?.seed, defaults.seed, seedValidators);
-	const reseed = normalizeSection(
-		source?.reseed,
-		defaults.reseed,
-		reseedValidators,
-	);
-	const suggestion = normalizeSection(
+	const seed = normalizeSeedConfig(source?.seed, defaults.seed);
+	const reseed = normalizeReseedConfig(source?.reseed, defaults.reseed);
+	const suggestion = normalizeSuggestionConfig(
 		source?.suggestion,
 		defaults.suggestion,
-		suggestionValidators,
 	);
-	const steering = normalizeSection(
-		source?.steering,
-		defaults.steering,
-		steeringValidators,
-	);
-	const logging = normalizeSection(
-		source?.logging,
-		defaults.logging,
-		loggingValidators,
-	);
-	const inference = normalizeSection(
+	const steering = normalizeSteeringConfig(source?.steering, defaults.steering);
+	const logging = normalizeLoggingConfig(source?.logging, defaults.logging);
+	const inference = normalizeInferenceConfig(
 		source?.inference,
 		defaults.inference,
-		inferenceValidators,
 	);
 
 	changed =
@@ -325,12 +529,12 @@ export function normalizeConfig(
 	return {
 		config: {
 			schemaVersion: defaults.schemaVersion,
-			seed: seed.value as SeedConfig,
-			reseed: reseed.value as ReseedConfig,
-			suggestion: suggestion.value as SuggestionConfig,
-			steering: steering.value as SteeringConfig,
-			logging: logging.value as LoggingConfig,
-			inference: inference.value as InferenceConfig,
+			seed: seed.value,
+			reseed: reseed.value,
+			suggestion: suggestion.value,
+			steering: steering.value,
+			logging: logging.value,
+			inference: inference.value,
 		},
 		changed,
 	};
@@ -339,27 +543,5 @@ export function normalizeConfig(
 export function validateConfig(
 	config: unknown,
 ): config is PromptSuggesterConfig {
-	if (!isObject(config)) return false;
-	if (!isSchemaVersion(config.schemaVersion)) return false;
-	if (
-		hasUnknownTopLevelKeys(config, {
-			schemaVersion: CURRENT_CONFIG_SCHEMA_VERSION,
-			seed: seedShape,
-			reseed: reseedShape,
-			suggestion: suggestionShape,
-			steering: steeringShape,
-			logging: loggingShape,
-			inference: inferenceShape,
-		})
-	)
-		return false;
-
-	return (
-		validateSection(config.seed, seedShape, seedValidators) &&
-		validateSection(config.reseed, reseedShape, reseedValidators) &&
-		validateSection(config.suggestion, suggestionShape, suggestionValidators) &&
-		validateSection(config.steering, steeringShape, steeringValidators) &&
-		validateSection(config.logging, loggingShape, loggingValidators) &&
-		validateSection(config.inference, inferenceShape, inferenceValidators)
-	);
+	return Value.Check(promptSuggesterConfigSchema, config);
 }

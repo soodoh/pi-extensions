@@ -21,6 +21,10 @@
 		"skills": [],
 		"themes": []
 	},
+	"dependencies": {
+		"typebox": "^1.1.37",
+		"yaml": "^2.8.3"
+	},
 	"scripts": {
 		"build": "tsc --noEmit",
 		"test": "vitest run --root ../.. packages/workflows --passWithNoTests",

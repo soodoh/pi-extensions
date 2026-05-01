@@ -1,3 +1,5 @@
+import { type Static, type TSchema, Type } from "typebox";
+import { Value } from "typebox/value";
 import { WorkflowRunner } from "./src/runner";
 import { getRun, listRuns, workflowRunStorePath } from "./src/store";
 import type { WorkflowRunRecord } from "./src/workflow-types";
@@ -23,7 +25,7 @@ type WorkflowTool = {
 	description: string;
 	promptSnippet?: string;
 	promptGuidelines?: string[];
-	parameters: JsonSchema;
+	parameters: TSchema;
 	execute: (
 		toolCallId: string,
 		params: unknown,
@@ -44,81 +46,55 @@ type PiApi = {
 	registerCommand(name: string, command: WorkflowCommand): void;
 	registerTool(tool: WorkflowTool): void;
 };
-type JsonSchema = {
-	type: string;
-	description?: string;
-	properties?: Record<string, JsonSchema>;
-	required?: string[];
-	additionalProperties?: boolean;
-	enum?: string[];
-};
-type PlanToolInput = {
-	runId: string;
-	filePath: string;
-	approvalNotes?: string;
-};
-type CompleteRunInput = {
-	runId: string;
-	status: "completed" | "failed";
-	summary?: string;
-};
-
-const approvePlanParameters: JsonSchema = {
-	type: "object",
-	properties: {
-		runId: {
-			type: "string",
-			description: "Pi workflow run id, e.g. pwf-1234abcd",
-		},
-		filePath: {
-			type: "string",
-			description: "Markdown plan path relative to workflow cwd",
-		},
-		approvalNotes: {
-			type: "string",
-			description: "Optional user approval notes or constraints",
-		},
+const runIdSchema = Type.Refine(
+	Type.String({
+		minLength: 1,
+		description: "Pi workflow run id, e.g. pwf-1234abcd",
+	}),
+	(value) => value.trim().length > 0,
+);
+const planFilePathSchema = Type.Refine(
+	Type.String({
+		minLength: 1,
+		description: "Markdown plan path relative to workflow cwd",
+	}),
+	(value) => value.trim().length > 0,
+);
+const approvePlanParameters = Type.Object(
+	{
+		runId: runIdSchema,
+		filePath: planFilePathSchema,
+		approvalNotes: Type.Optional(
+			Type.String({
+				description: "Optional user approval notes or constraints",
+			}),
+		),
 	},
-	required: ["runId", "filePath"],
-	additionalProperties: false,
-};
-
-const submitPlanParameters: JsonSchema = {
-	type: "object",
-	properties: {
-		runId: {
-			type: "string",
-			description: "Pi workflow run id, e.g. pwf-1234abcd",
-		},
-		filePath: {
-			type: "string",
-			description: "Markdown plan path relative to workflow cwd",
-		},
+	{ additionalProperties: false },
+);
+const submitPlanParameters = Type.Object(
+	{
+		runId: runIdSchema,
+		filePath: planFilePathSchema,
 	},
-	required: ["runId", "filePath"],
-	additionalProperties: false,
-};
-
-const completeRunParameters: JsonSchema = {
-	type: "object",
-	properties: {
-		runId: {
-			type: "string",
-			description: "Pi workflow run id, e.g. pwf-1234abcd",
-		},
-		status: {
-			type: "string",
+	{ additionalProperties: false },
+);
+const completeRunParameters = Type.Object(
+	{
+		runId: runIdSchema,
+		status: Type.Union([Type.Literal("completed"), Type.Literal("failed")], {
 			description: "Final workflow status",
-			enum: ["completed", "failed"],
-		},
-		summary: {
-			type: "string",
-			description: "Brief execution and validation summary",
-		},
+		}),
+		summary: Type.Optional(
+			Type.String({
+				description: "Brief execution and validation summary",
+			}),
+		),
 	},
-	required: ["runId", "status"],
-	additionalProperties: false,
-};
+	{ additionalProperties: false },
+);
+type PlanToolInput = Static<typeof approvePlanParameters>;
+type CompleteRunInput = Static<typeof completeRunParameters>;
 
 export default function piWorkflows(pi: PiApi) {
 	const runner = new WorkflowRunner(pi, import.meta.url);
@@ -286,40 +262,17 @@ export default function piWorkflows(pi: PiApi) {
 }
 
 function parsePlanToolInput(params: unknown): PlanToolInput {
-	if (!isRecord(params)) throw new Error("Tool parameters must be an object");
-	if (typeof params.runId !== "string" || !params.runId.trim())
-		throw new Error("runId is required");
-	if (typeof params.filePath !== "string" || !params.filePath.trim())
-		throw new Error("filePath is required");
-	if (
-		params.approvalNotes !== undefined &&
-		typeof params.approvalNotes !== "string"
-	)
-		throw new Error("approvalNotes must be a string when provided");
-	return {
-		runId: params.runId,
-		filePath: params.filePath,
-		approvalNotes: params.approvalNotes,
-	};
+	if (!Value.Check(approvePlanParameters, params)) {
+		throw new Error("Tool parameters must match workflow plan schema");
+	}
+	return params;
 }
 
 function parseCompleteRunInput(params: unknown): CompleteRunInput {
-	if (!isRecord(params)) throw new Error("Tool parameters must be an object");
-	if (typeof params.runId !== "string" || !params.runId.trim())
-		throw new Error("runId is required");
-	if (params.status !== "completed" && params.status !== "failed")
-		throw new Error("status must be completed or failed");
-	if (params.summary !== undefined && typeof params.summary !== "string")
-		throw new Error("summary must be a string when provided");
-	return {
-		runId: params.runId,
-		status: params.status,
-		summary: params.summary,
-	};
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+	if (!Value.Check(completeRunParameters, params)) {
+		throw new Error("Tool parameters must match workflow completion schema");
+	}
+	return params;
 }
 
 function formatRun(run: WorkflowRunRecord): string {

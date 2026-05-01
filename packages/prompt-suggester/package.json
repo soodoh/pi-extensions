@@ -14,6 +14,9 @@
 			"./src/index.ts"
 		]
 	},
+	"dependencies": {
+		"typebox": "^1.1.37"
+	},
 	"peerDependencies": {
 		"@mariozechner/pi-agent-core": "*",
 		"@mariozechner/pi-ai": "*",

@@ -2,6 +2,8 @@ import { existsSync } from "node:fs";
 import { readdir, readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, extname, join, resolve } from "node:path";
+import { Type } from "typebox";
+import { Value } from "typebox/value";
 import type {
 	LoadedConfig,
 	WorkflowCommand,
@@ -9,6 +11,135 @@ import type {
 	WorkflowNode,
 } from "./workflow-types";
 import { loadYamlFile } from "./yaml-loader";
+
+const nonEmptyStringSchema = Type.Refine(
+	Type.String({ minLength: 1 }),
+	(value) => value.trim().length > 0,
+);
+const thinkingLevelSchema = Type.Union([
+	Type.Literal("inherit"),
+	Type.Literal("auto"),
+	Type.Literal("minimal"),
+	Type.Literal("low"),
+	Type.Literal("medium"),
+	Type.Literal("high"),
+	Type.Literal("xhigh"),
+]);
+const modelPolicySchema = Type.Object({
+	model: Type.Optional(Type.String()),
+	models: Type.Optional(Type.Array(Type.String())),
+	autoSelectModel: Type.Optional(Type.Boolean()),
+	thinking: Type.Optional(thinkingLevelSchema),
+});
+const workflowLoopSchema = Type.Object({
+	prompt: Type.Optional(Type.String()),
+	command: Type.Optional(Type.String()),
+	until: Type.String(),
+	max_iterations: Type.Integer({ minimum: 1 }),
+	fresh_context: Type.Optional(Type.Boolean()),
+	until_bash: Type.Optional(Type.String()),
+});
+const workflowApprovalSchema = Type.Object({
+	message: Type.String(),
+	capture_response: Type.Optional(Type.Boolean()),
+	on_reject: Type.Optional(
+		Type.Object({
+			prompt: Type.String(),
+			max_attempts: Type.Optional(Type.Integer({ minimum: 1 })),
+		}),
+	),
+});
+const plannotatorReviewSchema = Type.Object({
+	artifact: Type.Optional(Type.String()),
+	filePath: Type.Optional(Type.String()),
+	loopOnDenied: Type.Optional(Type.Boolean()),
+});
+const handoffSchema = Type.Object({
+	mode: Type.Literal("newSession"),
+	seed: Type.Union([
+		Type.Literal("approvedPlanOnly"),
+		Type.Literal("planOnly"),
+	]),
+	artifacts: Type.Optional(Type.Array(Type.String())),
+	required: Type.Optional(Type.Boolean()),
+});
+const subagentTaskSchema = Type.Object({
+	agent: Type.String(),
+	task: Type.String(),
+	model: Type.Optional(Type.String()),
+	thinking: Type.Optional(thinkingLevelSchema),
+	output: Type.Optional(Type.Union([Type.String(), Type.Boolean()])),
+});
+const subagentSchema = Type.Object({
+	agent: Type.Optional(Type.String()),
+	task: Type.Optional(Type.String()),
+	tasks: Type.Optional(Type.Array(subagentTaskSchema)),
+	context: Type.Optional(
+		Type.Union([Type.Literal("fresh"), Type.Literal("fork")]),
+	),
+	concurrency: Type.Optional(Type.Integer({ minimum: 1 })),
+	worktree: Type.Optional(Type.Boolean()),
+});
+const workerReviewLoopSchema = Type.Object({
+	worker: Type.Optional(Type.String()),
+	reviewer: Type.Optional(Type.String()),
+	maxRounds: Type.Integer({ minimum: 1 }),
+	scope: Type.Optional(
+		Type.Union([
+			Type.Literal("plan"),
+			Type.Literal("task"),
+			Type.Literal("diff"),
+		]),
+	),
+});
+const worktreeWaveSchema = Type.Object({
+	worker: Type.Optional(Type.String()),
+	reviewer: Type.Optional(Type.String()),
+	maxRounds: Type.Optional(Type.Integer({ minimum: 1 })),
+	parallelWorkers: Type.Optional(Type.Boolean()),
+});
+const workflowNodeSchema = Type.Object({
+	id: nonEmptyStringSchema,
+	depends_on: Type.Optional(Type.Array(Type.String())),
+	when: Type.Optional(Type.String()),
+	trigger_rule: Type.Optional(
+		Type.Union([
+			Type.Literal("all_success"),
+			Type.Literal("one_success"),
+			Type.Literal("none_failed_min_one_success"),
+		]),
+	),
+	command: Type.Optional(Type.String()),
+	prompt: Type.Optional(Type.String()),
+	bash: Type.Optional(Type.String()),
+	script: Type.Optional(Type.String()),
+	context: Type.Optional(
+		Type.Union([
+			Type.Literal("fresh"),
+			Type.Literal("newSession"),
+			Type.Literal("inherit"),
+		]),
+	),
+	model: Type.Optional(Type.String()),
+	thinking: Type.Optional(thinkingLevelSchema),
+	modelPolicy: Type.Optional(modelPolicySchema),
+	output_format: Type.Optional(Type.Unknown()),
+	output_artifact: Type.Optional(Type.String()),
+	timeout: Type.Optional(Type.Number()),
+	loop: Type.Optional(workflowLoopSchema),
+	approval: Type.Optional(workflowApprovalSchema),
+	plannotator_review: Type.Optional(plannotatorReviewSchema),
+	handoff: Type.Optional(handoffSchema),
+	subagent: Type.Optional(subagentSchema),
+	workerReviewLoop: Type.Optional(workerReviewLoopSchema),
+	worktreeWave: Type.Optional(worktreeWaveSchema),
+});
+const workflowDefinitionSchema = Type.Object({
+	name: nonEmptyStringSchema,
+	description: nonEmptyStringSchema,
+	modelPolicy: Type.Optional(Type.Record(Type.String(), modelPolicySchema)),
+	nodes: Type.Array(workflowNodeSchema, { minItems: 1 }),
+});
 
 async function listFiles(
 	dir: string,
@@ -29,21 +160,13 @@ async function listFiles(
 	return out;
 }
 
-function isObject(value: unknown): value is Record<string, unknown> {
-	return Boolean(value) && typeof value === "object" && !Array.isArray(value);
-}
-
 function validateWorkflow(
 	value: unknown,
 	sourcePath: string,
 ): WorkflowDefinition {
-	if (!isObject(value)) throw new Error("workflow root must be an object");
-	if (typeof value.name !== "string" || !value.name.trim())
-		throw new Error("workflow.name is required");
-	if (typeof value.description !== "string" || !value.description.trim())
-		throw new Error("workflow.description is required");
-	if (!Array.isArray(value.nodes) || value.nodes.length === 0)
-		throw new Error("workflow.nodes must be a non-empty array");
+	if (!Value.Check(workflowDefinitionSchema, value)) {
+		throw new Error("workflow root must match workflow schema");
+	}
 	const ids = new Set<string>();
 	const nodes = value.nodes.map((node, index) =>
 		validateNode(node, index, ids),
@@ -55,7 +178,7 @@ function validateWorkflow(
 		}
 	}
 	return {
-		...(value as Omit<WorkflowDefinition, "sourcePath">),
+		...value,
 		nodes,
 		sourcePath,
 	};
@@ -66,43 +189,35 @@ function validateNode(
 	index: number,
 	ids: Set<string>,
 ): WorkflowNode {
-	if (!isObject(value)) throw new Error(`node[${index}] must be an object`);
-	if (typeof value.id !== "string" || !value.id.trim())
-		throw new Error(`node[${index}].id is required`);
+	if (!Value.Check(workflowNodeSchema, value)) {
+		throw new Error(`node[${index}] must match workflow node schema`);
+	}
 	if (ids.has(value.id)) throw new Error(`duplicate node id: ${value.id}`);
 	ids.add(value.id);
-	if (
-		value.depends_on !== undefined &&
-		(!Array.isArray(value.depends_on) ||
-			!value.depends_on.every((d) => typeof d === "string"))
-	) {
-		throw new Error(`node ${value.id}.depends_on must be a string array`);
-	}
-	if (value.when !== undefined) {
-		if (typeof value.when !== "string")
-			throw new Error(`node ${value.id}.when must be a string`);
-		if (!isSupportedWhenExpression(value.when))
-			throw new Error(
-				`node ${value.id}.when has unsupported expression: ${value.when}`,
-			);
+	if (value.when !== undefined && !isSupportedWhenExpression(value.when)) {
+		throw new Error(
+			`node ${value.id}.when has unsupported expression: ${value.when}`,
+		);
 	}
 	const typeFields = [
-		"command",
-		"prompt",
-		"bash",
-		"script",
-		"approval",
-		"plannotator_review",
-		"handoff",
-		"subagent",
-		"workerReviewLoop",
-		"worktreeWave",
-	].filter((k) => value[k] !== undefined);
+		["command", value.command],
+		["prompt", value.prompt],
+		["bash", value.bash],
+		["script", value.script],
+		["approval", value.approval],
+		["plannotator_review", value.plannotator_review],
+		["handoff", value.handoff],
+		["subagent", value.subagent],
+		["workerReviewLoop", value.workerReviewLoop],
+		["worktreeWave", value.worktreeWave],
+	]
+		.filter(([, fieldValue]) => fieldValue !== undefined)
+		.map(([fieldName]) => fieldName);
 	if (typeFields.length !== 1)
 		throw new Error(
 			`node ${value.id} must define exactly one node type; got ${typeFields.join(", ") || "none"}`,
 		);
-	return value as unknown as WorkflowNode;
+	return value;
 }
 
 function isSupportedWhenExpression(when: string): boolean {
@@ -123,7 +238,7 @@ function parseCommandFrontmatter(raw: string): {
 	const data: Record<string, string> = {};
 	for (const line of fm.split("\n")) {
 		const match = line.match(/^([A-Za-z0-9_-]+):\s*(.*)$/);
-		if (match) data[match[1]] = match[2].replace(/^['"]|['"]$/g, "");
+		if (match) data[match[1]] = match[2].replace(/^["']|["']$/g, "");
 	}
 	return { data, body };
 }

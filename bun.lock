@@ -27,6 +27,9 @@
     "packages/prompt-suggester": {
       "name": "prompt-suggester",
       "version": "0.1.0",
+      "dependencies": {
+        "typebox": "^1.1.37",
+      },
       "peerDependencies": {
         "@mariozechner/pi-agent-core": "*",
         "@mariozechner/pi-ai": "*",
@@ -49,6 +52,10 @@
     "packages/workflows": {
       "name": "workflows",
       "version": "0.1.0",
+      "dependencies": {
+        "typebox": "^1.1.37",
+        "yaml": "^2.8.3",
+      },
     },
   },
   "packages": {

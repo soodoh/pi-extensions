@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { readdir, readFile, realpath } from "node:fs/promises";
+import { lstat, readdir, readFile, realpath, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, extname, join, relative, resolve } from "node:path";
 import { Type } from "typebox";
@@ -27,6 +27,9 @@ const thinkingLevelSchema = Type.Union([
 	Type.Literal("xhigh"),
 ]);
 const strictObjectOptions = { additionalProperties: false };
+const MAX_DISCOVERY_DEPTH = 20;
+const MAX_DISCOVERY_FILES = 1000;
+const MAX_CONFIG_FILE_BYTES = 1024 * 1024;
 const modelPolicySchema = Type.Object(
 	{
 		model: Type.Optional(Type.String()),
@@ -179,23 +182,83 @@ const workflowDefinitionSchema = Type.Object(
 	strictObjectOptions,
 );
 
+type DiscoveryState = {
+	filesSeen: number;
+	stopped: boolean;
+};
+
+function errorMessage(err: unknown): string {
+	return err instanceof Error ? err.message : String(err);
+}
+
 async function listFiles(
 	dir: string,
 	extensions: Set<string>,
+	diagnostics: string[],
+	depth = 0,
+	state: DiscoveryState = { filesSeen: 0, stopped: false },
 ): Promise<string[]> {
-	if (!existsSync(dir)) return [];
-	const entries = await readdir(dir, { withFileTypes: true });
+	if (state.stopped || !existsSync(dir)) return [];
+	if (depth > MAX_DISCOVERY_DEPTH) {
+		diagnostics.push(
+			`${dir}: skipped because config discovery exceeded max depth ${MAX_DISCOVERY_DEPTH}`,
+		);
+		return [];
+	}
+	let entryNames: string[];
+	try {
+		entryNames = (await readdir(dir, { withFileTypes: true })).map(
+			(entry) => entry.name,
+		);
+	} catch (err) {
+		diagnostics.push(
+			`${dir}: skipped because directory could not be read: ${errorMessage(err)}`,
+		);
+		return [];
+	}
 	const out: string[] = [];
-	for (const entry of entries) {
-		const full = join(dir, entry.name);
-		if (entry.isDirectory()) out.push(...(await listFiles(full, extensions)));
-		else if (
-			entry.isFile() &&
-			extensions.has(extname(entry.name).toLowerCase())
-		)
-			out.push(full);
+	for (const entryName of entryNames) {
+		if (state.stopped) break;
+		const full = join(dir, entryName);
+		let metadata: Awaited<ReturnType<typeof lstat>>;
+		try {
+			metadata = await lstat(full);
+		} catch (err) {
+			diagnostics.push(
+				`${full}: skipped because path could not be statted: ${errorMessage(err)}`,
+			);
+			continue;
+		}
+		if (metadata.isSymbolicLink()) continue;
+		if (metadata.isDirectory()) {
+			out.push(
+				...(await listFiles(full, extensions, diagnostics, depth + 1, state)),
+			);
+			continue;
+		}
+		if (!metadata.isFile()) continue;
+		state.filesSeen += 1;
+		if (state.filesSeen > MAX_DISCOVERY_FILES) {
+			state.stopped = true;
+			diagnostics.push(
+				`${full}: stopped config discovery after ${MAX_DISCOVERY_FILES} files`,
+			);
+			break;
+		}
+		if (extensions.has(extname(entryName).toLowerCase())) out.push(full);
 	}
 	return out;
+}
+
+async function readTextFileWithinLimit(file: string): Promise<string> {
+	const metadata = await stat(file);
+	if (!metadata.isFile()) throw new Error("config path is not a file");
+	if (metadata.size > MAX_CONFIG_FILE_BYTES) {
+		throw new Error(
+			`config file is too large (${metadata.size} bytes; max ${MAX_CONFIG_FILE_BYTES} bytes)`,
+		);
+	}
+	return readFile(file, "utf8");
 }
 
 function validateWorkflow(
@@ -336,19 +399,26 @@ function parseCommandFrontmatter(raw: string): {
 	return { data, body };
 }
 
-async function loadCommands(dir: string): Promise<WorkflowCommand[]> {
-	const files = await listFiles(dir, new Set([".md"]));
+async function loadCommands(
+	dir: string,
+	diagnostics: string[],
+): Promise<WorkflowCommand[]> {
+	const files = await listFiles(dir, new Set([".md"]), diagnostics);
 	const commands: WorkflowCommand[] = [];
 	for (const file of files) {
-		const raw = await readFile(file, "utf8");
-		const parsed = parseCommandFrontmatter(raw);
-		commands.push({
-			name: basename(file, ".md"),
-			description: parsed.data.description,
-			argumentHint: parsed.data["argument-hint"],
-			content: parsed.body,
-			sourcePath: file,
-		});
+		try {
+			const raw = await readTextFileWithinLimit(file);
+			const parsed = parseCommandFrontmatter(raw);
+			commands.push({
+				name: basename(file, ".md"),
+				description: parsed.data.description,
+				argumentHint: parsed.data["argument-hint"],
+				content: parsed.body,
+				sourcePath: file,
+			});
+		} catch (err) {
+			diagnostics.push(`${file}: ${errorMessage(err)}`);
+		}
 	}
 	return commands;
 }
@@ -396,10 +466,17 @@ export async function loadWorkflowConfig(
 		) {
 			continue;
 		}
-		const files = await listFiles(dir.path, new Set([".yaml", ".yml"]));
+		const files = await listFiles(
+			dir.path,
+			new Set([".yaml", ".yml"]),
+			diagnostics,
+		);
 		for (const file of files) {
 			try {
-				const workflow = validateWorkflow(await loadYamlFile(file), file);
+				const workflow = validateWorkflow(
+					await loadYamlFile(file, { maxBytes: MAX_CONFIG_FILE_BYTES }),
+					file,
+				);
 				workflowsByName.set(workflow.name, workflow);
 			} catch (err) {
 				diagnostics.push(
@@ -417,7 +494,7 @@ export async function loadWorkflowConfig(
 		) {
 			continue;
 		}
-		for (const command of await loadCommands(dir.path))
+		for (const command of await loadCommands(dir.path, diagnostics))
 			commandsByName.set(command.name, command);
 	}
 

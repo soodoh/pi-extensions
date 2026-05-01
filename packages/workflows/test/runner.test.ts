@@ -29,7 +29,9 @@ function workflowCtx(cwd: string, sessionFile?: string): WorkflowContext {
 				}
 			: undefined,
 		async sendUserMessage() {},
-		async newSession() {},
+		async newSession() {
+			return { cancelled: false };
+		},
 	};
 }
 
@@ -176,6 +178,7 @@ nodes:
 						kickoff = message;
 					},
 				});
+				return { cancelled: false };
 			},
 		};
 		const runner = new WorkflowRunner(
@@ -278,6 +281,38 @@ nodes:
 		).rejects.toThrow(/Plan markdown file is too large/);
 	});
 
+	test("planning cancellation leaves the run created without planning session state", async () => {
+		const home = await tempDir("pi-workflows-runner-planning-cancel-home");
+		const cwd = await tempDir("pi-workflows-runner-planning-cancel-cwd");
+		const { WorkflowRunner } = await importRunnerWithHome(home);
+		const { listRuns } = await import("../src/store");
+		const runner = new WorkflowRunner(
+			{
+				events: {
+					emit: () => {},
+					on: () => undefined,
+				},
+				appendEntry: () => {},
+			},
+			pathToFileURL(new URL("../index.ts", import.meta.url).pathname).href,
+		);
+		const ctx: WorkflowContext = {
+			cwd,
+			async sendUserMessage() {},
+			async newSession() {
+				return { cancelled: true };
+			},
+		};
+
+		await expect(
+			runner.startWorkflow("plan-execute", "build a thing", ctx),
+		).rejects.toThrow(/planning session was cancelled/);
+
+		const [saved] = await listRuns();
+		expect(saved?.phase).toBe("created");
+		expect(saved?.planningSessionPath).toBeUndefined();
+	});
+
 	test("execute-plan handoff excludes the existing-plan loader node", async () => {
 		const home = await tempDir("pi-workflows-runner-home");
 		const cwd = await tempDir("pi-workflows-runner-cwd");
@@ -309,6 +344,7 @@ nodes:
 						kickoff = message;
 					},
 				});
+				return { cancelled: false };
 			},
 		};
 		const pi = {
@@ -358,6 +394,7 @@ nodes:
 			async sendUserMessage() {},
 			async newSession() {
 				newSessionCalls += 1;
+				return { cancelled: false };
 			},
 		};
 
@@ -411,6 +448,7 @@ nodes:
 					...workflowCtx(cwd, join(cwd, "execution-session.json")),
 				});
 				if (newSessionCalls === 1) await firstSessionBlocked;
+				return { cancelled: false };
 			},
 		};
 
@@ -426,6 +464,45 @@ nodes:
 
 		expect(newSessionCalls).toBe(1);
 		expect((await getRun("pwf-88888888"))?.phase).toBe("executing");
+	});
+
+	test("execution cancellation leaves approved runs approved without execution session state", async () => {
+		const home = await tempDir("pi-workflows-runner-execution-cancel-home");
+		const cwd = await tempDir("pi-workflows-runner-execution-cancel-cwd");
+		await writeFile(
+			join(cwd, "plan.md"),
+			"# Plan\n\n- [ ] Update one file\n",
+			"utf8",
+		);
+		const { WorkflowRunner } = await importRunnerWithHome(home);
+		const { getRun, saveRun } = await import("../src/store");
+		await saveRun({
+			...runRecord("pwf-99999999", cwd, "approved"),
+			planPath: "plan.md",
+		});
+		const runner = new WorkflowRunner(
+			{
+				events: {
+					emit: () => {},
+					on: () => undefined,
+				},
+			},
+			pathToFileURL(new URL("../index.ts", import.meta.url).pathname).href,
+		);
+		const ctx: WorkflowContext = {
+			cwd,
+			async sendUserMessage() {},
+			async newSession() {
+				return { cancelled: true };
+			},
+		};
+
+		await expect(runner.continueExecution("pwf-99999999", ctx)).rejects.toThrow(
+			/execution session was cancelled/,
+		);
+		const saved = await getRun("pwf-99999999");
+		expect(saved?.phase).toBe("approved");
+		expect(saved?.executionSessionPath).toBeUndefined();
 	});
 
 	test("continueExecution fails clearly for executing runs without a recorded session", async () => {
@@ -479,6 +556,7 @@ nodes:
 				await options.withSession({
 					...workflowCtx(cwd),
 				});
+				return { cancelled: false };
 			},
 		};
 
@@ -524,6 +602,7 @@ nodes:
 						throw new Error("send failed");
 					},
 				});
+				return { cancelled: false };
 			},
 		};
 

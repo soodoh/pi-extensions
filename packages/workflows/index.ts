@@ -153,6 +153,10 @@ export default function piWorkflows(pi: PiApi) {
 		handler: async (args, ctx) => {
 			const id = args?.trim();
 			if (id) {
+				if (!isValidWorkflowRunId(id)) {
+					ctx.ui.notify(invalidRunIdMessage("workflow-status", id), "error");
+					return;
+				}
 				const run = await getRun(id);
 				ctx.ui.notify(
 					run ? formatRun(run) : `No workflow run found for ${id}`,
@@ -178,6 +182,15 @@ export default function piWorkflows(pi: PiApi) {
 				ctx.ui.notify("Usage: /workflow-continue <runId>", "error");
 				return;
 			}
+			if (!isValidWorkflowRunId(runId)) {
+				ctx.ui.notify(invalidRunIdMessage("workflow-continue", runId), "error");
+				return;
+			}
+			const run = await getRun(runId);
+			if (!run) {
+				ctx.ui.notify(`No workflow run found for ${runId}`, "error");
+				return;
+			}
 			lastStatus = `${runId} handoff`;
 			ctx.ui.setStatus?.("workflow", lastStatus);
 			await runner.continueExecution(runId, ctx);
@@ -190,6 +203,15 @@ export default function piWorkflows(pi: PiApi) {
 			const runId = args?.trim();
 			if (!runId) {
 				ctx.ui.notify("Usage: /workflow-resume <runId>", "error");
+				return;
+			}
+			if (!isValidWorkflowRunId(runId)) {
+				ctx.ui.notify(invalidRunIdMessage("workflow-resume", runId), "error");
+				return;
+			}
+			const run = await getRun(runId);
+			if (!run) {
+				ctx.ui.notify(`No workflow run found for ${runId}`, "error");
 				return;
 			}
 			await runner.continueExecution(runId, ctx);
@@ -297,6 +319,14 @@ function parseCompleteRunInput(params: unknown): CompleteRunInput {
 		throw new Error("Tool parameters must match workflow completion schema");
 	}
 	return params;
+}
+
+function invalidRunIdMessage(command: string, runId: string): string {
+	const usage =
+		command === "workflow-status"
+			? "/workflow-status [runId]"
+			: `/${command} <runId>`;
+	return `Usage: ${usage}\nInvalid workflow run id: ${runId}`;
 }
 
 function formatRun(run: WorkflowRunRecord): string {

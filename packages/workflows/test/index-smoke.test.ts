@@ -8,6 +8,16 @@ const runnerMethods = vi.hoisted(() => ({
 	submitPlan: vi.fn(async () => ({ approved: true, text: "submitted" })),
 	completeRun: vi.fn(async () => ({ text: "completed" })),
 }));
+const storeMethods = vi.hoisted(() => ({
+	getRun: vi.fn(async () => undefined),
+	listRuns: vi.fn(async () => []),
+}));
+
+vi.mock("../src/store", () => ({
+	getRun: storeMethods.getRun,
+	listRuns: storeMethods.listRuns,
+	workflowRunStorePath: "/tmp/pi-workflow-runs.json",
+}));
 
 vi.mock("../src/runner", () => ({
 	WorkflowRunner: vi.fn(function WorkflowRunner() {
@@ -52,13 +62,18 @@ function createContext(): Context {
 			notify: vi.fn(),
 			setStatus: vi.fn(),
 		},
-		async newSession() {},
+		async newSession() {
+			return { cancelled: false };
+		},
 		async sendUserMessage() {},
 	};
 }
 
 beforeEach(() => {
 	for (const method of Object.values(runnerMethods)) method.mockClear();
+	for (const method of Object.values(storeMethods)) method.mockClear();
+	storeMethods.getRun.mockResolvedValue(undefined);
+	storeMethods.listRuns.mockResolvedValue([]);
 });
 
 describe("pi workflows extension entrypoint", () => {
@@ -144,5 +159,42 @@ describe("pi workflows extension entrypoint", () => {
 			"done",
 			ctx,
 		);
+	});
+
+	test("slash commands reject invalid run ids before store or runner calls", async () => {
+		const pi = createPi();
+		piWorkflows(pi);
+		const ctx = createContext();
+
+		await pi.commands.get("workflow-status")?.handler("not-a-run", ctx);
+		await pi.commands.get("workflow-continue")?.handler("not-a-run", ctx);
+		await pi.commands.get("workflow-resume")?.handler("not-a-run", ctx);
+
+		expect(ctx.ui.notify).toHaveBeenCalledTimes(3);
+		expect(ctx.ui.notify).toHaveBeenCalledWith(
+			expect.stringContaining("Invalid workflow run id: not-a-run"),
+			"error",
+		);
+		expect(storeMethods.getRun).not.toHaveBeenCalled();
+		expect(runnerMethods.continueExecution).not.toHaveBeenCalled();
+	});
+
+	test("slash commands notify for unknown valid run ids instead of throwing", async () => {
+		const pi = createPi();
+		piWorkflows(pi);
+		const ctx = createContext();
+		const runId = "pwf-aaaaaaaa";
+
+		await pi.commands.get("workflow-status")?.handler(runId, ctx);
+		await pi.commands.get("workflow-continue")?.handler(runId, ctx);
+		await pi.commands.get("workflow-resume")?.handler(runId, ctx);
+
+		expect(storeMethods.getRun).toHaveBeenCalledTimes(3);
+		expect(ctx.ui.notify).toHaveBeenCalledTimes(3);
+		expect(ctx.ui.notify).toHaveBeenCalledWith(
+			`No workflow run found for ${runId}`,
+			"error",
+		);
+		expect(runnerMethods.continueExecution).not.toHaveBeenCalled();
 	});
 });

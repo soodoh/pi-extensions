@@ -247,6 +247,35 @@ nodes:
 		expect(config.diagnostics.join("\n")).toContain("workflow schema");
 	});
 
+	test("skips oversized workflow and command files with diagnostics", async () => {
+		const home = await tempDir("pi-workflows-oversized-home");
+		const cwd = await tempDir("pi-workflows-oversized-cwd");
+		const extensionRoot = await tempDir("pi-workflows-oversized-extension");
+		const workflowDir = join(extensionRoot, "workflows", "defaults");
+		const commandDir = join(extensionRoot, "commands", "defaults");
+		await mkdir(workflowDir, { recursive: true });
+		await mkdir(commandDir, { recursive: true });
+		await writeFile(
+			join(workflowDir, "large.yaml"),
+			`name: large\n\ndescription: ${"a".repeat(1024 * 1024)}\n\nnodes:\n  - id: run\n    command: large\n`,
+			"utf8",
+		);
+		await writeFile(
+			join(commandDir, "large.md"),
+			"a".repeat(1024 * 1024 + 1),
+			"utf8",
+		);
+
+		const { loadWorkflowConfig } = await importConfigLoaderWithHome(home);
+		const config = await loadWorkflowConfig(cwd, extensionRoot);
+
+		expect(config.workflows).toEqual([]);
+		expect(config.commands).toEqual([]);
+		expect(config.diagnostics.join("\n")).toContain("large.yaml");
+		expect(config.diagnostics.join("\n")).toContain("large.md");
+		expect(config.diagnostics.join("\n")).toContain("too large");
+	});
+
 	test("skips project-local config directories that resolve outside cwd", async () => {
 		const home = await tempDir("pi-workflows-symlink-home");
 		const cwd = await tempDir("pi-workflows-symlink-cwd");

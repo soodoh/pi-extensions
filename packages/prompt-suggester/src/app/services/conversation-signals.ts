@@ -30,6 +30,10 @@ function textFromContent(content: unknown): string {
 		.trim();
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 function extractToolSignals(messages: AgentMessage[]): {
 	toolSignals: string[];
 	touchedFiles: string[];
@@ -41,15 +45,15 @@ function extractToolSignals(messages: AgentMessage[]): {
 		if (message.role === "assistant" && Array.isArray(message.content)) {
 			for (const block of message.content) {
 				if (block.type === "toolCall") {
-					const args = block.arguments as Record<string, unknown>;
+					const args = isRecord(block.arguments) ? block.arguments : undefined;
 					const pathValue =
-						typeof args.path === "string" ? args.path : undefined;
+						typeof args?.path === "string" ? args.path : undefined;
 					const fileValue =
-						typeof args.file === "string" ? args.file : undefined;
+						typeof args?.file === "string" ? args.file : undefined;
 					const patternValue =
-						typeof args.pattern === "string" ? args.pattern : undefined;
+						typeof args?.pattern === "string" ? args.pattern : undefined;
 					const commandValue =
-						typeof args.command === "string" ? args.command : undefined;
+						typeof args?.command === "string" ? args.command : undefined;
 					const target = pathValue ?? fileValue ?? patternValue ?? commandValue;
 					toolSignals.push(`${block.name}${target ? `(${target})` : ""}`);
 					if (pathValue) touchedFiles.add(pathValue.replace(/^@/, ""));

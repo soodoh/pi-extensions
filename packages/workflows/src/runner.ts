@@ -88,7 +88,7 @@ export type WorkflowContext = {
 		parentSession?: string;
 		setup?: (sessionManager: WorkflowSessionManager) => MaybePromise<void>;
 		withSession: (ctx: WorkflowContext) => MaybePromise<void>;
-	}): Promise<void>;
+	}): Promise<{ cancelled: boolean }>;
 	sendUserMessage(message: string): Promise<void>;
 	modelRegistry?: Parameters<typeof applyModelPolicy>[1]["modelRegistry"];
 };
@@ -184,8 +184,6 @@ export class WorkflowRunner {
 			throw new Error(`${workflow.name} is missing create-plan command node`);
 		const command = await this.findCommand(ctx.cwd, planNode.command);
 		if (!command) throw new Error(`Missing command: ${planNode.command}`);
-		run.phase = "planning";
-		await saveRun(run);
 		const prompt = this.renderCommand(command, {
 			ARGUMENTS: args,
 			USER_MESSAGE: args,
@@ -203,18 +201,45 @@ export class WorkflowRunner {
 		run.logs.push(selection.reason);
 		await saveRun(run);
 		const sessionName = `workflow: ${run.workflowName} planning ${run.id}`;
-		await ctx.newSession({
-			parentSession: ctx.sessionManager?.getSessionFile?.(),
-			setup: async (sm) => {
-				sm.appendSessionInfo?.(sessionName);
-			},
-			withSession: async (newCtx) => {
-				run.planningSessionPath = newCtx.sessionManager?.getSessionFile?.();
-				run.logs.push(`${nowIso()} planning session started`);
-				await saveRun(run);
-				await newCtx.sendUserMessage(prompt);
-			},
-		});
+		let planningSessionPath: string | undefined;
+		try {
+			const sessionResult = await ctx.newSession({
+				parentSession: ctx.sessionManager?.getSessionFile?.(),
+				setup: async (sm) => {
+					sm.appendSessionInfo?.(sessionName);
+				},
+				withSession: async (newCtx) => {
+					planningSessionPath = newCtx.sessionManager
+						?.getSessionFile?.()
+						?.trim();
+					if (!planningSessionPath) {
+						throw new Error(
+							`Workflow run ${run.id} planning session did not provide a session file; refusing to mark the run planning.`,
+						);
+					}
+					await newCtx.sendUserMessage(prompt);
+				},
+			});
+			if (sessionResult.cancelled) {
+				throw new Error(
+					`Workflow run ${run.id} planning session was cancelled.`,
+				);
+			}
+			if (!planningSessionPath) {
+				throw new Error(
+					`Workflow run ${run.id} planning session did not provide a session file; refusing to mark the run planning.`,
+				);
+			}
+		} catch (err) {
+			run.phase = "created";
+			run.planningSessionPath = undefined;
+			await saveRun(run);
+			throw err;
+		}
+		run.phase = "planning";
+		run.planningSessionPath = planningSessionPath;
+		run.logs.push(`${nowIso()} planning session started`);
+		await saveRun(run);
 		return run;
 	}
 	private async startExistingPlan(
@@ -395,7 +420,7 @@ export class WorkflowRunner {
 		await saveRun(run);
 		const sessionName = `workflow: ${run.workflowName} execution ${run.id}`;
 		let executionSessionPath: string | undefined;
-		await ctx.newSession({
+		const sessionResult = await ctx.newSession({
 			parentSession: ctx.sessionManager?.getSessionFile?.(),
 			setup: async (sm) => {
 				sm.appendSessionInfo?.(sessionName);
@@ -422,6 +447,14 @@ export class WorkflowRunner {
 				await newCtx.sendUserMessage(kickoff);
 			},
 		});
+		if (sessionResult.cancelled) {
+			throw new Error(`Workflow run ${runId} execution session was cancelled.`);
+		}
+		if (!executionSessionPath) {
+			throw new Error(
+				`Workflow run ${runId} execution session did not provide a session file; refusing to mark the run executing.`,
+			);
+		}
 		run.phase = "executing";
 		run.executionSessionPath = executionSessionPath;
 		await saveRun(run);

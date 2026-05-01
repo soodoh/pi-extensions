@@ -220,6 +220,18 @@ function validateNode(
 	return value;
 }
 
+function validateWorkflowCommands(
+	workflow: WorkflowDefinition,
+	commandsByName: Map<string, WorkflowCommand>,
+): string[] {
+	return workflow.nodes
+		.filter((node) => node.command && !commandsByName.has(node.command))
+		.map(
+			(node) =>
+				`node ${node.id} references unknown command ${node.command ?? ""}`,
+		);
+}
+
 function isSupportedWhenExpression(when: string): boolean {
 	return /^\$classify-plan\.output\.complexity\s*==\s*['"](simple|medium|complex)['"]$/.test(
 		when,
@@ -295,6 +307,18 @@ export async function loadWorkflowConfig(
 	for (const dir of commandDirs) {
 		for (const command of await loadCommands(dir))
 			commandsByName.set(command.name, command);
+	}
+
+	for (const [name, workflow] of workflowsByName) {
+		const commandDiagnostics = validateWorkflowCommands(
+			workflow,
+			commandsByName,
+		);
+		if (commandDiagnostics.length === 0) continue;
+		workflowsByName.delete(name);
+		for (const diagnostic of commandDiagnostics) {
+			diagnostics.push(`${workflow.sourcePath}: ${diagnostic}`);
+		}
 	}
 
 	return {

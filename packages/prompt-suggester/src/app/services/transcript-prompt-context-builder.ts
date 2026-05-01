@@ -29,8 +29,16 @@ function estimateTranscriptChars(messages: Message[]): number {
 	);
 }
 
-function cloneMessages(messages: Message[]): Message[] {
-	return JSON.parse(JSON.stringify(messages)) as Message[];
+function capTranscriptMessages(
+	messages: Message[],
+	maxMessages: number,
+	maxChars: number,
+): Message[] {
+	const capped = structuredClone(messages).slice(-maxMessages);
+	while (capped.length > 1 && estimateTranscriptChars(capped) > maxChars) {
+		capped.shift();
+	}
+	return capped;
 }
 
 export interface TranscriptSuggestionPromptContext {
@@ -68,7 +76,11 @@ export class TranscriptPromptContextBuilder {
 		if (!transcript.systemPrompt.trim()) {
 			throw new Error("Active session transcript is missing a system prompt");
 		}
-		const transcriptMessages = cloneMessages(transcript.messages);
+		const transcriptMessages = capTranscriptMessages(
+			transcript.messages,
+			config.suggestion.transcriptMaxMessages,
+			config.suggestion.transcriptMaxChars,
+		);
 		return {
 			systemPrompt: transcript.systemPrompt,
 			transcriptMessages,

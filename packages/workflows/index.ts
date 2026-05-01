@@ -5,6 +5,7 @@ import {
 	WorkflowRunner,
 } from "./src/runner";
 import { getRun, listRuns, workflowRunStorePath } from "./src/store";
+import { isValidWorkflowRunId } from "./src/utils";
 import type { WorkflowRunRecord } from "./src/workflow-types";
 
 type NotifyLevel = "info" | "error" | string;
@@ -62,7 +63,7 @@ const runIdSchema = Type.Refine(
 		minLength: 1,
 		description: "Pi workflow run id, e.g. pwf-1234abcd",
 	}),
-	(value) => value.trim().length > 0,
+	isValidWorkflowRunId,
 );
 const planFilePathSchema = Type.Refine(
 	Type.String({
@@ -104,7 +105,8 @@ const completeRunParameters = Type.Object(
 	},
 	{ additionalProperties: false },
 );
-type PlanToolInput = Static<typeof approvePlanParameters>;
+type ApprovePlanToolInput = Static<typeof approvePlanParameters>;
+type SubmitPlanToolInput = Static<typeof submitPlanParameters>;
 type CompleteRunInput = Static<typeof completeRunParameters>;
 
 export default function piWorkflows(pi: PiApi) {
@@ -205,7 +207,7 @@ export default function piWorkflows(pi: PiApi) {
 		],
 		parameters: approvePlanParameters,
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-			const input = parsePlanToolInput(params);
+			const input = parseApprovePlanToolInput(params);
 			const result = await runner.approvePlan(
 				input.runId,
 				input.filePath,
@@ -233,7 +235,7 @@ export default function piWorkflows(pi: PiApi) {
 		],
 		parameters: submitPlanParameters,
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-			const input = parsePlanToolInput(params);
+			const input = parseSubmitPlanToolInput(params);
 			const result = await runner.submitPlan(input.runId, input.filePath, ctx);
 			lastStatus = `${input.runId} ${result.approved ? "approved" : "planning"}`;
 			ctx.ui.setStatus?.("workflow", lastStatus);
@@ -272,9 +274,18 @@ export default function piWorkflows(pi: PiApi) {
 	});
 }
 
-function parsePlanToolInput(params: unknown): PlanToolInput {
+export function parseApprovePlanToolInput(
+	params: unknown,
+): ApprovePlanToolInput {
 	if (!Value.Check(approvePlanParameters, params)) {
-		throw new Error("Tool parameters must match workflow plan schema");
+		throw new Error("Tool parameters must match workflow plan approval schema");
+	}
+	return params;
+}
+
+export function parseSubmitPlanToolInput(params: unknown): SubmitPlanToolInput {
+	if (!Value.Check(submitPlanParameters, params)) {
+		throw new Error("Tool parameters must match workflow plan submit schema");
 	}
 	return params;
 }

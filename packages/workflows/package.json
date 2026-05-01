@@ -6,7 +6,16 @@
 	"main": "index.ts",
 	"files": [
 		"index.ts",
-		"src",
+		"src/config-loader.ts",
+		"src/model-policy.ts",
+		"src/pi-events.ts",
+		"src/plannotator.ts",
+		"src/runner.ts",
+		"src/store.ts",
+		"src/subagents.ts",
+		"src/utils.ts",
+		"src/workflow-types.ts",
+		"src/yaml-loader.ts",
 		"commands",
 		"workflows",
 		"README.md"

@@ -5,6 +5,20 @@ import { homedir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+const WORKFLOW_RUN_ID_PATTERN = /^pwf-[a-f0-9]{8}$/;
+
+export function isValidWorkflowRunId(id: string): boolean {
+	return WORKFLOW_RUN_ID_PATTERN.test(id);
+}
+
+export function normalizeWorkflowRunId(id: string): string {
+	const normalized = id.trim();
+	if (!isValidWorkflowRunId(normalized)) {
+		throw new Error(`Invalid workflow run id: ${id}`);
+	}
+	return normalized;
+}
+
 export function makeRunId(): string {
 	return `pwf-${randomUUID().slice(0, 8)}`;
 }

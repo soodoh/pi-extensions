@@ -8,7 +8,9 @@ import {
 	ensureRealPathInsideCwd,
 	extensionDir,
 	homePath,
+	isValidWorkflowRunId,
 	makeRunId,
+	normalizeWorkflowRunId,
 	nowIso,
 	readTextIfExists,
 	sha256,
@@ -17,7 +19,14 @@ import {
 
 describe("workflow utils", () => {
 	test("formats ids, timestamps, hashes, and home paths", () => {
-		expect(makeRunId()).toMatch(/^pwf-[a-f0-9]{8}$/);
+		const runId = makeRunId();
+		expect(runId).toMatch(/^pwf-[a-f0-9]{8}$/);
+		expect(isValidWorkflowRunId(runId)).toBe(true);
+		expect(normalizeWorkflowRunId(` ${runId} `)).toBe(runId);
+		expect(isValidWorkflowRunId("../pwf-11111111")).toBe(false);
+		expect(() => normalizeWorkflowRunId("pwf-../bad")).toThrow(
+			/Invalid workflow run id/,
+		);
 		expect(Date.parse(nowIso())).not.toBeNaN();
 		expect(sha256("abc")).toBe(
 			"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",

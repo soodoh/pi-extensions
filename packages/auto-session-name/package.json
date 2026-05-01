@@ -5,7 +5,8 @@
 	"description": "Pi extension that names skill-started sessions from the user's actual request.",
 	"main": "index.ts",
 	"files": [
-		"*.ts",
+		"index.ts",
+		"auto-session-name.ts",
 		"README.md"
 	],
 	"pi": {

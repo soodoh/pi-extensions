@@ -5,7 +5,8 @@
 	"description": "Pi extension that shares prompt history across sessions.",
 	"main": "index.ts",
 	"files": [
-		"*.ts",
+		"index.ts",
+		"history-store.ts",
 		"README.md"
 	],
 	"pi": {

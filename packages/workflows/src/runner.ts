@@ -9,6 +9,7 @@ import {
 	ensureRealPathInsideCwd,
 	extensionDir,
 	makeRunId,
+	normalizeWorkflowRunId,
 	nowIso,
 	sha256,
 } from "./utils";
@@ -494,7 +495,7 @@ ${renderedNodes.join("\n\n")}`;
 		return text;
 	}
 	artifactsDir(cwd: string, runId: string): string {
-		return join(cwd, ".pi", "workflow-runs", runId);
+		return join(cwd, ".pi", "workflow-runs", normalizeWorkflowRunId(runId));
 	}
 }
 type PlanComplexity = NonNullable<WorkflowRunRecord["selectedComplexity"]>;
@@ -508,10 +509,18 @@ function executionNodes(
 		(node) =>
 			node.id !== "create-plan" &&
 			node.id !== "classify-plan" &&
+			!isNonExecutionLoaderNode(node) &&
 			!node.handoff &&
 			!node.approval &&
 			!node.plannotator_review &&
 			matchesWhen(node.when, selectedComplexity),
+	);
+}
+
+function isNonExecutionLoaderNode(node: WorkflowNode): boolean {
+	return (
+		node.id === "load-plan" ||
+		Boolean(node.output_artifact && node.context === "newSession")
 	);
 }
 

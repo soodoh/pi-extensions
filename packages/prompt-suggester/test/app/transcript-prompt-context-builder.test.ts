@@ -135,6 +135,93 @@ test("TranscriptPromptContextBuilder preserves transcript metadata and slices ch
 	expect(context.noSuggestionToken).toBe("[no suggestion]");
 });
 
+test("TranscriptPromptContextBuilder applies transcript message cap to most recent messages", () => {
+	const builder = new TranscriptPromptContextBuilder(
+		{
+			...baseConfig,
+			suggestion: { ...baseConfig.suggestion, transcriptMaxMessages: 2 },
+		},
+		{
+			getActiveTranscript() {
+				return {
+					systemPrompt: "system prompt",
+					messages: [
+						{ role: "user", timestamp: 1, content: "oldest" },
+						{ role: "user", timestamp: 2, content: "middle" },
+						{ role: "user", timestamp: 3, content: "newest" },
+					],
+				};
+			},
+		},
+	);
+
+	const context = builder.build(null, { recentChanged: [] });
+
+	expect(context.transcriptMessageCount).toBe(2);
+	expect(context.transcriptMessages.map((message) => message.content)).toEqual([
+		"middle",
+		"newest",
+	]);
+});
+
+test("TranscriptPromptContextBuilder trims oldest messages to fit transcript char cap", () => {
+	const builder = new TranscriptPromptContextBuilder(
+		{
+			...baseConfig,
+			suggestion: { ...baseConfig.suggestion, transcriptMaxChars: 9 },
+		},
+		{
+			getActiveTranscript() {
+				return {
+					systemPrompt: "system prompt",
+					messages: [
+						{ role: "user", timestamp: 1, content: "aaaaa" },
+						{ role: "user", timestamp: 2, content: "bbbb" },
+						{ role: "user", timestamp: 3, content: "ccccc" },
+					],
+				};
+			},
+		},
+	);
+
+	const context = builder.build(null, { recentChanged: [] });
+
+	expect(context.transcriptMessageCount).toBe(2);
+	expect(context.transcriptCharCount).toBe(9);
+	expect(context.transcriptMessages.map((message) => message.content)).toEqual([
+		"bbbb",
+		"ccccc",
+	]);
+});
+
+test("TranscriptPromptContextBuilder keeps newest single message when it exceeds char cap", () => {
+	const builder = new TranscriptPromptContextBuilder(
+		{
+			...baseConfig,
+			suggestion: { ...baseConfig.suggestion, transcriptMaxChars: 3 },
+		},
+		{
+			getActiveTranscript() {
+				return {
+					systemPrompt: "system prompt",
+					messages: [
+						{ role: "user", timestamp: 1, content: "old" },
+						{ role: "user", timestamp: 2, content: "toolong" },
+					],
+				};
+			},
+		},
+	);
+
+	const context = builder.build(null, { recentChanged: [] });
+
+	expect(context.transcriptMessageCount).toBe(1);
+	expect(context.transcriptCharCount).toBe(7);
+	expect(context.transcriptMessages.map((message) => message.content)).toEqual([
+		"toolong",
+	]);
+});
+
 test("TranscriptPromptContextBuilder throws when transcript is unavailable", () => {
 	const builder = new TranscriptPromptContextBuilder(baseConfig, {
 		getActiveTranscript() {

@@ -239,6 +239,72 @@ test("SessionStateStore regenerates corrupt migration metadata JSON", async () =
 	).toMatchObject({ schemaVersion: STORE_SCHEMA_VERSION });
 });
 
+test("SessionStateStore drops wrong-shaped persisted interaction fields", async () => {
+	const cwd = await mkdtemp(
+		path.join(os.tmpdir(), "pi-suggester-session-cwd-"),
+	);
+	const projectStateDir = await mkdtemp(
+		path.join(os.tmpdir(), "pi-suggester-session-state-"),
+	);
+	const sessionManager = createPersistentSessionManager(cwd);
+	const storageContext = createSessionStorageContext(
+		projectStateDir,
+		sessionManager,
+	);
+	if (!storageContext.persistent) {
+		throw new Error("expected persistent storage context");
+	}
+	await mkdir(storageContext.interactionDir, { recursive: true });
+	await writeFile(
+		stateFilePath(storageContext.interactionDir, "leaf-1"),
+		JSON.stringify({
+			lastSuggestion: { text: "missing required fields" },
+			pendingNextTurnObservation: {
+				suggestionTurnId: 123,
+				suggestionShownAt: "2026-03-13T12:00:00.000Z",
+				userPromptSubmittedAt: "2026-03-13T12:01:00.000Z",
+			},
+			steeringHistory: [
+				{
+					turnId: "turn-1",
+					suggestedPrompt: "old",
+					actualUserPrompt: "new",
+					classification: "unknown",
+					similarity: 0.1,
+					timestamp: "2026-03-13T12:02:00.000Z",
+				},
+				{
+					turnId: "turn-2",
+					suggestedPrompt: "accepted",
+					actualUserPrompt: "accepted",
+					classification: "accepted_exact",
+					similarity: 1,
+					timestamp: "2026-03-13T12:03:00.000Z",
+				},
+			],
+			turnsSinceLastStalenessCheck: 4,
+		}),
+		"utf8",
+	);
+
+	const store = new SessionStateStore(projectStateDir, () => sessionManager);
+	const state = await store.load();
+
+	expect(state.lastSuggestion).toBeUndefined();
+	expect(state.pendingNextTurnObservation).toBeUndefined();
+	expect(state.steeringHistory).toEqual([
+		{
+			turnId: "turn-2",
+			suggestedPrompt: "accepted",
+			actualUserPrompt: "accepted",
+			classification: "accepted_exact",
+			similarity: 1,
+			timestamp: "2026-03-13T12:03:00.000Z",
+		},
+	]);
+	expect(state.turnsSinceLastStalenessCheck).toBe(4);
+});
+
 test("session state normalization rejects non-finite and negative persisted numbers", async () => {
 	const data = await import("../../../src/infra/pi/session-state-data");
 

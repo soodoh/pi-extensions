@@ -145,10 +145,10 @@ const workflowNodeSchema = Type.Object(
 				Type.Literal("none_failed_min_one_success"),
 			]),
 		),
-		command: Type.Optional(Type.String()),
-		prompt: Type.Optional(Type.String()),
-		bash: Type.Optional(Type.String()),
-		script: Type.Optional(Type.String()),
+		command: Type.Optional(nonEmptyStringSchema),
+		prompt: Type.Optional(nonEmptyStringSchema),
+		bash: Type.Optional(nonEmptyStringSchema),
+		script: Type.Optional(nonEmptyStringSchema),
 		context: Type.Optional(
 			Type.Union([
 				Type.Literal("fresh"),

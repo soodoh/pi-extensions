@@ -1,6 +1,7 @@
 import type { PromptSuggesterConfig } from "../../config/types";
 import {
 	CURRENT_GENERATOR_VERSION,
+	CURRENT_SEED_VERSION,
 	SEEDER_PROMPT_VERSION,
 	type SeedArtifact,
 	type StalenessCheckResult,
@@ -54,6 +55,7 @@ export class StalenessChecker {
 		}
 
 		if (
+			seed.seedVersion !== CURRENT_SEED_VERSION ||
 			seed.generatorVersion !== CURRENT_GENERATOR_VERSION ||
 			seed.seederPromptVersion !== SEEDER_PROMPT_VERSION ||
 			seed.suggestionPromptVersion !== SUGGESTION_PROMPT_VERSION

@@ -269,6 +269,98 @@ test("PiModelClient find tool matches root files for plain patterns", async (t) 
 	expect(toolResults).toContain("package.json");
 });
 
+test("PiModelClient returns bounded tool errors to the seeder after missing paths", async (t) => {
+	const cwd = await tempDir("pi-suggester-missing-tool-path");
+	await writeFile(join(cwd, "visible.txt"), "visible\n", "utf8");
+	let callCount = 0;
+	const api = `test-api-${Math.random().toString(36).slice(2)}`;
+	const sourceId = `test-provider-${Math.random().toString(36).slice(2)}`;
+	registerApiProvider(
+		{
+			api,
+			stream() {
+				throw new Error("stream should not be used in these tests");
+			},
+			streamSimple() {
+				callCount += 1;
+				return {
+					async result() {
+						return successResponse(
+							callCount === 1
+								? JSON.stringify({
+										type: "tool",
+										tool: "read",
+										arguments: { path: "missing.txt" },
+									})
+								: JSON.stringify({
+										type: "final",
+										seed: {
+											projectIntentSummary: "Test project",
+											objectivesSummary: "Exercise tool error recovery",
+											constraintsSummary: "Keep tests small",
+											principlesGuidelinesSummary: "Use fixtures",
+											implementationStatusSummary: "Ready",
+											topObjectives: ["Exercise tool error recovery"],
+											constraints: ["Keep tests small"],
+											keyFiles: [
+												{
+													path: "visible.txt",
+													category: "vision",
+													whyImportant: "Fixture file",
+												},
+											],
+											categoryFindings: {
+												vision: { found: true, rationale: "fixture file" },
+												architecture: {
+													found: false,
+													rationale: "not needed",
+												},
+												principles_guidelines: {
+													found: false,
+													rationale: "not needed",
+												},
+											},
+										},
+									}),
+						);
+					},
+				};
+			},
+		},
+		sourceId,
+	);
+	t.onTestFinished(() => unregisterApiProviders(sourceId));
+	const warnings: string[] = [];
+	const results: string[] = [];
+	const logger: Logger = {
+		debug() {},
+		info(_message, meta) {
+			if (typeof meta?.toolResultPreview === "string") {
+				results.push(meta.toolResultPreview);
+			}
+		},
+		warn(_message, meta) {
+			if (typeof meta?.toolResultPreview === "string") {
+				warnings.push(meta.toolResultPreview);
+			}
+		},
+		error() {},
+	};
+	const model = createModel(api);
+	const client = new PiModelClient(createRuntimeWithModel(model), logger, cwd);
+
+	const result = await client.generateSeed({
+		reseedTrigger: { reason: "manual", changedFiles: [] },
+		previousSeed: null,
+	});
+
+	expect(result.seed.keyFiles[0]?.path).toBe("visible.txt");
+	expect(callCount).toBe(2);
+	expect(warnings.join("\n")).toContain("[tool error:");
+	expect(warnings.join("\n")).toContain("missing.txt");
+	expect(results.join("\n")).toContain("[tool error:");
+});
+
 test("PiModelClient resolves auth via getApiKeyAndHeaders when available", async (t) => {
 	let observedOptions: SimpleStreamOptions | undefined;
 	const provider = registerTestProvider(successResponse("ok"), (options) => {

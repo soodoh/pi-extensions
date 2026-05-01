@@ -196,6 +196,26 @@ function isStaleExtensionContextError(error: unknown): boolean {
 	);
 }
 
+function isExpectedSeederToolError(error: unknown): boolean {
+	if (!(error instanceof Error)) return false;
+	const code = getErrorProperty(error, "code");
+	if (
+		typeof code === "string" &&
+		["ENOENT", "ENOTDIR", "EISDIR", "EACCES", "EPERM"].includes(code)
+	) {
+		return true;
+	}
+	return (
+		error.message.startsWith("Path escapes repository root:") ||
+		error.message.endsWith("requires pattern")
+	);
+}
+
+function seederToolErrorObservation(error: unknown): string {
+	const message = error instanceof Error ? error.message : String(error);
+	return truncate(`[tool error: ${message}]`, 8000);
+}
+
 function extractText(content: unknown): string {
 	if (!Array.isArray(content)) return "";
 	return content
@@ -650,10 +670,24 @@ export class PiModelClient implements ModelClient {
 					reason: response.reason,
 					modelResponsePreview: preview(responseText.text),
 				});
-				const toolResult = await this.executeSeederTool(
-					response.tool,
-					response.arguments ?? {},
-				);
+				let toolResult: string;
+				try {
+					toolResult = await this.executeSeederTool(
+						response.tool,
+						response.arguments ?? {},
+					);
+				} catch (error) {
+					if (!isExpectedSeederToolError(error)) throw error;
+					toolResult = seederToolErrorObservation(error);
+					this.logger?.warn("seeder.tool.failed", {
+						runId,
+						step,
+						tool: response.tool,
+						arguments: response.arguments,
+						error: error instanceof Error ? error.message : String(error),
+						toolResultPreview: preview(toolResult, 700),
+					});
+				}
 				this.logger?.info("seeder.tool.result", {
 					runId,
 					step,

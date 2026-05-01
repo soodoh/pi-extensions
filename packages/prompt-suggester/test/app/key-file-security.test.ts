@@ -217,6 +217,49 @@ test("ReseedRunner refuses to hash model-selected key files that symlink outside
 	]);
 });
 
+test("StalenessChecker treats seed schema version mismatch as stale", async () => {
+	const config = createConfig();
+	let diffPaths: string[] = [];
+	const checker = new StalenessChecker({
+		config,
+		fileHash: {
+			async hashFile() {
+				throw new Error("hashFile should not be called for version staleness");
+			},
+		},
+		vcs: {
+			async getHeadCommit() {
+				return null;
+			},
+			async getChangedFilesSinceCommit() {
+				return ["src/versioned.ts"];
+			},
+			async getDiffSummary(paths) {
+				diffPaths = paths;
+				return `diff:${paths.join(",")}`;
+			},
+			async getWorkingTreeStatus() {
+				return ["README.md"];
+			},
+		},
+	});
+
+	const result = await checker.check({
+		...createSeed(config, []),
+		seedVersion: CURRENT_SEED_VERSION - 1,
+	});
+
+	expect(result).toEqual({
+		stale: true,
+		trigger: {
+			reason: "generator_changed",
+			changedFiles: ["README.md", "src/versioned.ts"],
+			gitDiffSummary: "diff:README.md,src/versioned.ts",
+		},
+	});
+	expect(diffPaths).toEqual(["README.md", "src/versioned.ts"]);
+});
+
 test("StalenessChecker treats persisted symlink traversal key files as changed without hashing them", async () => {
 	const cwd = await mkdtemp(path.join(os.tmpdir(), "pi-suggester-cwd-"));
 	const outside = await mkdtemp(

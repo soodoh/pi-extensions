@@ -226,6 +226,42 @@ nodes:
 		).rejects.toThrow(/Plan must be an existing markdown file/);
 	});
 
+	test("plan approval reports manual resume when follow-up delivery is unavailable", async () => {
+		const home = await tempDir("pi-workflows-runner-no-followup-home");
+		const cwd = await tempDir("pi-workflows-runner-no-followup-cwd");
+		await writeFile(join(cwd, "plan.md"), "# Plan\n", "utf8");
+		const { WorkflowRunner } = await importRunnerWithHome(home);
+		const { saveRun } = await import("../src/store");
+		const sessionFile = join(cwd, "planning-session.json");
+		await saveRun({
+			...runRecord("pwf-99999999", cwd, "planning"),
+			planningSessionPath: sessionFile,
+		});
+		const runner = new WorkflowRunner(
+			{
+				events: {
+					emit: () => {},
+					on: () => undefined,
+				},
+			},
+			pathToFileURL(new URL("../index.ts", import.meta.url).pathname).href,
+		);
+
+		const result = await runner.approvePlan(
+			"pwf-99999999",
+			"plan.md",
+			undefined,
+			workflowCtx(cwd, sessionFile),
+		);
+
+		expect(result.approved).toBe(true);
+		expect(result.text).toContain("failed to queue execution handoff");
+		expect(result.text).toContain("Pi sendUserMessage API is unavailable");
+		expect(result.text).toContain(
+			"Run /workflow-continue pwf-99999999 manually",
+		);
+	});
+
 	test("plan approval rejects a missing plan path with validation error", async () => {
 		const home = await tempDir("pi-workflows-runner-missing-artifact-home");
 		const cwd = await tempDir("pi-workflows-runner-missing-artifact-cwd");

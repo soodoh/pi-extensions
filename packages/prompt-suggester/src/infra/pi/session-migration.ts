@@ -42,11 +42,8 @@ async function performMigration(params: {
 	const { context, cwd, getSessionManager } = params;
 	if (!context.persistent) return;
 	await ensurePrivateDirectory(context.storageDir);
-	const existingMeta =
-		await readRecoverableSessionJson<PersistedSessionMetadata>(
-			context.metaFile,
-		);
-	if (existingMeta?.schemaVersion === STORE_SCHEMA_VERSION) return;
+	const existingMeta = await readRecoverableSessionJson(context.metaFile);
+	if (hasCurrentStoreSchemaVersion(existingMeta)) return;
 
 	const sessionManager = getSessionManager();
 	const allEntries = sessionManager?.getEntries() ?? [];
@@ -63,9 +60,7 @@ async function performMigration(params: {
 		);
 	}
 
-	if (
-		!(await readRecoverableSessionJson<PersistedUsageState>(context.usageFile))
-	) {
+	if (!(await readRecoverableSessionJson(context.usageFile))) {
 		await atomicWriteJson(context.usageFile, {
 			schemaVersion: STORE_SCHEMA_VERSION,
 			suggestionUsage: usageTotals.suggester,
@@ -90,11 +85,19 @@ async function performMigration(params: {
 	} satisfies PersistedSessionMetadata);
 }
 
-async function readRecoverableSessionJson<T>(
+function hasCurrentStoreSchemaVersion(value: unknown): boolean {
+	return (
+		typeof value === "object" &&
+		value !== null &&
+		Reflect.get(value, "schemaVersion") === STORE_SCHEMA_VERSION
+	);
+}
+
+async function readRecoverableSessionJson(
 	filePath: string,
-): Promise<T | undefined> {
+): Promise<unknown | undefined> {
 	try {
-		return await readJsonIfExists<T>(filePath);
+		return await readJsonIfExists(filePath);
 	} catch (error) {
 		if (error instanceof SyntaxError) return undefined;
 		throw error;

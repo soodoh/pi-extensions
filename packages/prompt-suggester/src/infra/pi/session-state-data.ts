@@ -32,6 +32,104 @@ function isObjectRecord(value: unknown): value is Record<PropertyKey, unknown> {
 	return typeof value === "object" && value !== null;
 }
 
+function isSuggestionStrategy(
+	value: unknown,
+): value is "compact" | "transcript-steering" {
+	return value === "compact" || value === "transcript-steering";
+}
+
+function optionalString(value: unknown): string | undefined {
+	return typeof value === "string" ? value : undefined;
+}
+
+function optionalSuggestionStrategy(
+	value: unknown,
+): "compact" | "transcript-steering" | undefined {
+	return isSuggestionStrategy(value) ? value : undefined;
+}
+
+function parseLastSuggestion(
+	raw: unknown,
+): RuntimeState["lastSuggestion"] | undefined {
+	if (!isObjectRecord(raw)) return undefined;
+	if (
+		typeof raw.text !== "string" ||
+		typeof raw.shownAt !== "string" ||
+		typeof raw.turnId !== "string" ||
+		typeof raw.sourceLeafId !== "string"
+	) {
+		return undefined;
+	}
+	return {
+		text: raw.text,
+		shownAt: raw.shownAt,
+		turnId: raw.turnId,
+		sourceLeafId: raw.sourceLeafId,
+		variantName: optionalString(raw.variantName),
+		strategy: optionalSuggestionStrategy(raw.strategy),
+		requestedStrategy: optionalSuggestionStrategy(raw.requestedStrategy),
+	};
+}
+
+function parsePendingNextTurnObservation(
+	raw: unknown,
+): RuntimeState["pendingNextTurnObservation"] | undefined {
+	if (!isObjectRecord(raw)) return undefined;
+	if (
+		typeof raw.suggestionTurnId !== "string" ||
+		typeof raw.suggestionShownAt !== "string" ||
+		typeof raw.userPromptSubmittedAt !== "string"
+	) {
+		return undefined;
+	}
+	return {
+		suggestionTurnId: raw.suggestionTurnId,
+		suggestionShownAt: raw.suggestionShownAt,
+		userPromptSubmittedAt: raw.userPromptSubmittedAt,
+		variantName: optionalString(raw.variantName),
+		strategy: optionalSuggestionStrategy(raw.strategy),
+		requestedStrategy: optionalSuggestionStrategy(raw.requestedStrategy),
+	};
+}
+
+function isSteeringClassification(
+	value: unknown,
+): value is "accepted_exact" | "accepted_edited" | "changed_course" {
+	return (
+		value === "accepted_exact" ||
+		value === "accepted_edited" ||
+		value === "changed_course"
+	);
+}
+
+function parseSteeringHistory(raw: unknown): RuntimeState["steeringHistory"] {
+	if (!Array.isArray(raw)) return [];
+	return raw.flatMap((entry) => {
+		if (!isObjectRecord(entry)) return [];
+		if (
+			typeof entry.turnId !== "string" ||
+			typeof entry.suggestedPrompt !== "string" ||
+			typeof entry.actualUserPrompt !== "string" ||
+			!isSteeringClassification(entry.classification) ||
+			typeof entry.similarity !== "number" ||
+			!Number.isFinite(entry.similarity) ||
+			typeof entry.timestamp !== "string"
+		) {
+			return [];
+		}
+		return [
+			{
+				turnId: entry.turnId,
+				suggestedPrompt: entry.suggestedPrompt,
+				actualUserPrompt: entry.actualUserPrompt,
+				classification: entry.classification,
+				similarity: entry.similarity,
+				timestamp: entry.timestamp,
+			},
+		];
+	});
+}
+
 function parseUsage(raw: unknown): SuggestionUsage | undefined {
 	if (!isObjectRecord(raw)) return undefined;
 	return {
@@ -47,16 +145,14 @@ function parseUsage(raw: unknown): SuggestionUsage | undefined {
 export function normalizeInteractionState(
 	raw: unknown,
 ): PersistedInteractionState {
-	const latest = (raw ?? INITIAL_RUNTIME_STATE) as Partial<RuntimeState> & {
-		steeringHistory?: unknown;
-	};
+	const latest = isObjectRecord(raw) ? raw : INITIAL_RUNTIME_STATE;
 	return {
 		stateVersion: CURRENT_RUNTIME_STATE_VERSION,
-		lastSuggestion: latest.lastSuggestion,
-		pendingNextTurnObservation: latest.pendingNextTurnObservation,
-		steeringHistory: Array.isArray(latest.steeringHistory)
-			? latest.steeringHistory
-			: [],
+		lastSuggestion: parseLastSuggestion(latest.lastSuggestion),
+		pendingNextTurnObservation: parsePendingNextTurnObservation(
+			latest.pendingNextTurnObservation,
+		),
+		steeringHistory: parseSteeringHistory(latest.steeringHistory),
 		turnsSinceLastStalenessCheck: normalizeFiniteNonNegativeNumber(
 			latest.turnsSinceLastStalenessCheck,
 		),

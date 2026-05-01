@@ -22,9 +22,7 @@ export class SessionUsageLedger {
 		context: Extract<SessionStorageContext, { persistent: true }>,
 	): Promise<SuggestionUsageStatsPair> {
 		try {
-			const persisted = await readJsonIfExists<PersistedUsageState>(
-				context.usageFile,
-			);
+			const persisted = await readJsonIfExists(context.usageFile);
 			if (!persisted) return emptyUsagePair();
 			return normalizePersistedUsagePair(persisted);
 		} catch (error) {

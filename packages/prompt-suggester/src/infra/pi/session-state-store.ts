@@ -112,7 +112,7 @@ export class SessionStateStore implements StateStore {
 	): Promise<PersistedInteractionState> {
 		for (const key of context.lookupKeys) {
 			try {
-				const state = await readJsonIfExists<PersistedInteractionState>(
+				const state = await readJsonIfExists(
 					stateFilePath(context.interactionDir, key),
 				);
 				if (state) return normalizeInteractionState(state);

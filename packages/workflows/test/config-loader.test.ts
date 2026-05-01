@@ -78,6 +78,73 @@ nodes:
 		);
 	});
 
+	test("drops workflows with empty node body strings and reports diagnostics", async () => {
+		const home = await tempDir("pi-workflows-empty-node-body-home");
+		const cwd = await tempDir("pi-workflows-empty-node-body-cwd");
+		const extensionRoot = await tempDir("pi-workflows-empty-node-body-ext");
+		const workflowDir = join(extensionRoot, "workflows", "defaults");
+		await mkdir(workflowDir, { recursive: true });
+		await writeFile(
+			join(workflowDir, "empty-command.yaml"),
+			`name: empty-command
+
+description: Empty command workflow
+
+nodes:
+  - id: run
+    command: "   "
+`,
+			"utf8",
+		);
+		await writeFile(
+			join(workflowDir, "empty-prompt.yaml"),
+			`name: empty-prompt
+
+description: Empty prompt workflow
+
+nodes:
+  - id: run
+    prompt: ""
+`,
+			"utf8",
+		);
+		await writeFile(
+			join(workflowDir, "empty-bash.yaml"),
+			`name: empty-bash
+
+description: Empty bash workflow
+
+nodes:
+  - id: run
+    bash: "\t"
+`,
+			"utf8",
+		);
+		await writeFile(
+			join(workflowDir, "empty-script.yaml"),
+			`name: empty-script
+
+description: Empty script workflow
+
+nodes:
+  - id: run
+    script: "   "
+`,
+			"utf8",
+		);
+
+		const { loadWorkflowConfig } = await importConfigLoaderWithHome(home);
+		const config = await loadWorkflowConfig(cwd, extensionRoot);
+
+		expect(config.workflows).toEqual([]);
+		expect(config.diagnostics).toHaveLength(4);
+		expect(config.diagnostics.join("\n")).toContain("empty-command.yaml");
+		expect(config.diagnostics.join("\n")).toContain("empty-prompt.yaml");
+		expect(config.diagnostics.join("\n")).toContain("empty-bash.yaml");
+		expect(config.diagnostics.join("\n")).toContain("empty-script.yaml");
+		expect(config.diagnostics.join("\n")).toContain("workflow schema");
+	});
+
 	test("drops workflows with cyclic depends_on and reports diagnostics", async () => {
 		const home = await tempDir("pi-workflows-cycle-home");
 		const cwd = await tempDir("pi-workflows-cycle-cwd");

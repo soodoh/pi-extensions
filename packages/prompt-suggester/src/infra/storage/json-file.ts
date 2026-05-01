@@ -1,12 +1,21 @@
 import { promises as fs } from "node:fs";
 
-export async function readJsonIfExists<T = unknown>(
+function errorCode(error: unknown): string | undefined {
+	const code =
+		typeof error === "object" && error !== null
+			? Reflect.get(error, "code")
+			: undefined;
+	return typeof code === "string" ? code : undefined;
+}
+
+export async function readJsonIfExists(
 	filePath: string,
-): Promise<T | undefined> {
+): Promise<unknown | undefined> {
 	try {
-		return JSON.parse(await fs.readFile(filePath, "utf8")) as T;
+		const parsed: unknown = JSON.parse(await fs.readFile(filePath, "utf8"));
+		return parsed;
 	} catch (error) {
-		if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+		if (errorCode(error) === "ENOENT") return undefined;
 		throw error;
 	}
 }

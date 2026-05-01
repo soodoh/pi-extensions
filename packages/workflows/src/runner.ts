@@ -107,7 +107,6 @@ type WorkflowPiApi = Parameters<typeof applyModelPolicy>[0] & {
 };
 
 export class WorkflowRunner {
-	private configCache: LoadedConfig | undefined;
 	private readonly continueExecutionLocks = new Map<string, Promise<void>>();
 	private pi: WorkflowPiApi;
 	private importMetaUrl: string;
@@ -119,8 +118,7 @@ export class WorkflowRunner {
 		return extensionDir(this.importMetaUrl);
 	}
 	async config(cwd: string): Promise<LoadedConfig> {
-		this.configCache = await loadWorkflowConfig(cwd, this.root());
-		return this.configCache;
+		return await loadWorkflowConfig(cwd, this.root());
 	}
 	async findWorkflow(
 		cwd: string,
@@ -355,8 +353,11 @@ export class WorkflowRunner {
 	private async queueExecutionHandoff(
 		runId: string,
 	): Promise<string | undefined> {
+		if (!this.pi.sendUserMessage) {
+			return "Pi sendUserMessage API is unavailable";
+		}
 		try {
-			await this.pi.sendUserMessage?.(`/workflow-continue ${runId}`, {
+			await this.pi.sendUserMessage(`/workflow-continue ${runId}`, {
 				deliverAs: "followUp",
 			});
 			return undefined;

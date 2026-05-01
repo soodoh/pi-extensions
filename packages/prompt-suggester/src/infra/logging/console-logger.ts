@@ -16,6 +16,74 @@ function truncate(value: string, maxChars: number): string {
 	return `${value.slice(0, maxChars)}…`;
 }
 
+const MAX_META_DEPTH = 4;
+const MAX_META_ENTRIES = 50;
+const MAX_META_STRING_CHARS = 500;
+
+function safeMetaValue(
+	value: unknown,
+	seen: WeakSet<object>,
+	depth: number,
+): unknown {
+	if (typeof value === "string") return truncate(value, MAX_META_STRING_CHARS);
+	if (
+		typeof value === "number" ||
+		typeof value === "boolean" ||
+		value === null
+	) {
+		return value;
+	}
+	if (typeof value === "bigint") return value.toString();
+	if (typeof value === "symbol") return value.toString();
+	if (typeof value === "function") return "[Function]";
+	if (typeof value !== "object") return undefined;
+	if (seen.has(value)) return "[Circular]";
+	if (depth >= MAX_META_DEPTH) return "[MaxDepth]";
+	seen.add(value);
+	try {
+		if (Array.isArray(value)) {
+			return value
+				.slice(0, MAX_META_ENTRIES)
+				.map((entry) => safeMetaValue(entry, seen, depth + 1));
+		}
+
+		const out: Record<string, unknown> = {};
+		let keys: string[];
+		try {
+			keys = Object.keys(value).slice(0, MAX_META_ENTRIES);
+		} catch {
+			return "[Unserializable]";
+		}
+		for (const key of keys) {
+			try {
+				out[key] = safeMetaValue(Reflect.get(value, key), seen, depth + 1);
+			} catch {
+				out[key] = "[Thrown]";
+			}
+		}
+		return out;
+	} finally {
+		seen.delete(value);
+	}
+}
+
+function safeSerializeMeta(meta: Record<string, unknown> | undefined): string {
+	if (!meta) return "";
+	let hasKeys = false;
+	try {
+		hasKeys = Object.keys(meta).length > 0;
+	} catch {
+		return " [unserializable meta]";
+	}
+	if (!hasKeys) return "";
+	try {
+		const serialized = JSON.stringify(safeMetaValue(meta, new WeakSet(), 0));
+		return serialized ? ` ${truncate(serialized, 1000)}` : "";
+	} catch {
+		return " [unserializable meta]";
+	}
+}
+
 interface ConsoleLoggerOptions {
 	getContext?: () => ExtensionContext | undefined;
 	statusKey?: string;
@@ -61,17 +129,20 @@ export class ConsoleLogger implements Logger {
 	): void {
 		if (LEVEL_ORDER[level] < LEVEL_ORDER[this.level]) return;
 		if (this.options.eventLog) {
-			void this.options.eventLog
-				.append({
-					at: new Date().toISOString(),
-					level,
-					message,
-					meta,
-				})
-				.catch(() => undefined);
+			try {
+				void this.options.eventLog
+					.append({
+						at: new Date().toISOString(),
+						level,
+						message,
+						meta,
+					})
+					.catch(() => undefined);
+			} catch {
+				// Logging must not fail the extension when the event sink rejects metadata.
+			}
 		}
-		const payload =
-			meta && Object.keys(meta).length > 0 ? ` ${JSON.stringify(meta)}` : "";
+		const payload = safeSerializeMeta(meta);
 		const line = truncate(`[suggester ${level}] ${message}${payload}`, 220);
 		const statusLine = truncate(`[suggester ${level}] ${message}`, 120);
 		try {

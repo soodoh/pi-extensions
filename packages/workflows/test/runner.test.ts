@@ -244,4 +244,66 @@ nodes:
 		expect(kickoff).not.toContain("command: pi-load-existing-plan");
 		expect(kickoff).toContain("### Node: simple-implementation");
 	});
+
+	test("continueExecution does not create duplicate sessions for an executing run", async () => {
+		const home = await tempDir("pi-workflows-runner-idempotent-home");
+		const cwd = await tempDir("pi-workflows-runner-idempotent-cwd");
+		const { WorkflowRunner } = await importRunnerWithHome(home);
+		const { getRun, saveRun } = await import("../src/store");
+		const run = {
+			...runRecord("pwf-33333333", cwd, "executing"),
+			planPath: "plan.md",
+			executionSessionPath: join(cwd, "execution-session.json"),
+		};
+		await writeFile(join(cwd, "plan.md"), "# Plan\n", "utf8");
+		await saveRun(run);
+		let newSessionCalls = 0;
+		const runner = new WorkflowRunner(
+			{
+				events: {
+					emit: () => {},
+					on: () => undefined,
+				},
+			},
+			pathToFileURL(new URL("../index.ts", import.meta.url).pathname).href,
+		);
+		const ctx: WorkflowContext = {
+			cwd,
+			async sendUserMessage() {},
+			async newSession() {
+				newSessionCalls += 1;
+			},
+		};
+
+		await runner.continueExecution("pwf-33333333", ctx);
+
+		expect(newSessionCalls).toBe(0);
+		expect((await getRun("pwf-33333333"))?.executionSessionPath).toBe(
+			run.executionSessionPath,
+		);
+	});
+
+	test("continueExecution fails clearly for executing runs without a recorded session", async () => {
+		const home = await tempDir("pi-workflows-runner-idempotent-home");
+		const cwd = await tempDir("pi-workflows-runner-idempotent-cwd");
+		const { WorkflowRunner } = await importRunnerWithHome(home);
+		const { saveRun } = await import("../src/store");
+		await saveRun({
+			...runRecord("pwf-44444444", cwd, "executing"),
+			planPath: "plan.md",
+		});
+		const runner = new WorkflowRunner(
+			{
+				events: {
+					emit: () => {},
+					on: () => undefined,
+				},
+			},
+			pathToFileURL(new URL("../index.ts", import.meta.url).pathname).href,
+		);
+
+		await expect(
+			runner.continueExecution("pwf-44444444", workflowCtx(cwd)),
+		).rejects.toThrow(/refusing to create a duplicate session/);
+	});
 });

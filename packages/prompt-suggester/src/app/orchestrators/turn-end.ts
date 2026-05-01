@@ -14,8 +14,8 @@ export interface SuggestionSink {
 	showSuggestion(
 		text: string,
 		options?: { restore?: boolean; generationId?: number },
-	): Promise<void>;
-	clearSuggestion(options?: { generationId?: number }): Promise<void>;
+	): Promise<boolean>;
+	clearSuggestion(options?: { generationId?: number }): Promise<boolean>;
 	setUsage(usage: {
 		suggester: SuggestionUsageStats;
 		seeder: SuggestionUsageStats;
@@ -153,18 +153,22 @@ export class TurnEndOrchestrator {
 				totalTokens: suggestion.usage?.totalTokens,
 				cost: suggestion.usage?.costTotal,
 			});
-			await this.deps.suggestionSink.clearSuggestion({ generationId });
+			const cleared = await this.deps.suggestionSink.clearSuggestion({
+				generationId,
+			});
 			await this.deps.suggestionSink.setUsage({
 				suggester: nextUsage,
 				seeder: state.seederUsage,
 			});
-			await this.deps.stateStore.save({
-				...state,
-				lastSuggestion: undefined,
-				pendingNextTurnObservation: undefined,
-				suggestionUsage: nextUsage,
-				turnsSinceLastStalenessCheck,
-			});
+			if (cleared) {
+				await this.deps.stateStore.save({
+					...state,
+					lastSuggestion: undefined,
+					pendingNextTurnObservation: undefined,
+					suggestionUsage: nextUsage,
+					turnsSinceLastStalenessCheck,
+				});
+			}
 			return;
 		}
 
@@ -187,43 +191,52 @@ export class TurnEndOrchestrator {
 				rejectedTurnId: repeatedRejectedSuggestion.turnId,
 				preview: suggestion.text.slice(0, 200),
 			});
-			await this.deps.suggestionSink.clearSuggestion({ generationId });
+			const cleared = await this.deps.suggestionSink.clearSuggestion({
+				generationId,
+			});
 			await this.deps.suggestionSink.setUsage({
 				suggester: nextUsage,
 				seeder: state.seederUsage,
 			});
-			await this.deps.stateStore.save({
-				...state,
-				lastSuggestion: undefined,
-				pendingNextTurnObservation: undefined,
-				suggestionUsage: nextUsage,
-				turnsSinceLastStalenessCheck,
-			});
+			if (cleared) {
+				await this.deps.stateStore.save({
+					...state,
+					lastSuggestion: undefined,
+					pendingNextTurnObservation: undefined,
+					suggestionUsage: nextUsage,
+					turnsSinceLastStalenessCheck,
+				});
+			}
 			return;
 		}
 
-		await this.deps.suggestionSink.showSuggestion(suggestion.text, {
-			generationId,
-		});
+		const shown = await this.deps.suggestionSink.showSuggestion(
+			suggestion.text,
+			{
+				generationId,
+			},
+		);
 		await this.deps.suggestionSink.setUsage({
 			suggester: nextUsage,
 			seeder: state.seederUsage,
 		});
-		await this.deps.stateStore.save({
-			...state,
-			lastSuggestion: {
-				text: suggestion.text,
-				shownAt: turn.occurredAt,
-				turnId: turn.turnId,
-				sourceLeafId: turn.sourceLeafId,
-				variantName: activeVariantName,
-				strategy: metadata.strategy,
-				requestedStrategy: metadata.requestedStrategy,
-			},
-			pendingNextTurnObservation: undefined,
-			suggestionUsage: nextUsage,
-			turnsSinceLastStalenessCheck,
-		});
+		if (shown) {
+			await this.deps.stateStore.save({
+				...state,
+				lastSuggestion: {
+					text: suggestion.text,
+					shownAt: turn.occurredAt,
+					turnId: turn.turnId,
+					sourceLeafId: turn.sourceLeafId,
+					variantName: activeVariantName,
+					strategy: metadata.strategy,
+					requestedStrategy: metadata.requestedStrategy,
+				},
+				pendingNextTurnObservation: undefined,
+				suggestionUsage: nextUsage,
+				turnsSinceLastStalenessCheck,
+			});
+		}
 		this.deps.logger.info("suggestion.generated", {
 			turnId: turn.turnId,
 			variantName: activeVariantName,

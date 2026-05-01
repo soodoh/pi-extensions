@@ -143,3 +143,44 @@ test("prompt suggester isolates runtime composition for simultaneous same-projec
 	expect(createAppCompositionMock).toHaveBeenNthCalledWith(1, pi, cwd);
 	expect(createAppCompositionMock).toHaveBeenNthCalledWith(2, pi, cwd);
 });
+
+test("prompt suggester recreates session composition after shutdown", async () => {
+	const cwd = path.resolve("/tmp/project-one");
+	const pi = createPi();
+	const ctx = createContext(cwd, { sessionId: "session-one" });
+	suggester(pi);
+
+	await pi.handlers.get("session_start")?.({}, ctx);
+	await pi.handlers.get("session_shutdown")?.({}, ctx);
+	await pi.handlers.get("session_start")?.({}, ctx);
+
+	expect(compositionCwds).toEqual([cwd, cwd]);
+	expect(createAppCompositionMock).toHaveBeenCalledTimes(2);
+});
+
+test("prompt suggester ignores stale shutdown contexts before resolving composition key", async () => {
+	const pi = createPi();
+	suggester(pi);
+	const staleContext: SessionContext = {
+		hasUI: false,
+		sessionManager: {
+			getCwd() {
+				throw new Error("extension ctx is stale");
+			},
+			getSessionFile() {
+				throw new Error("extension ctx is stale");
+			},
+			getLeafId() {
+				return "leaf-1";
+			},
+			getBranch() {
+				return [];
+			},
+		},
+	};
+
+	await expect(
+		pi.handlers.get("session_shutdown")?.({}, staleContext),
+	).resolves.toBeUndefined();
+	expect(createAppCompositionMock).not.toHaveBeenCalled();
+});

@@ -58,6 +58,7 @@ function isExtensionContext(
 
 export default function suggester(pi: PromptSuggesterApi) {
 	const compositionPromises = new Map<string, Promise<AppComposition>>();
+	const compositionKeysBySessionManager = new WeakMap<object, string>();
 	const sessionManagerKeys = new WeakMap<object, string>();
 	const ghostEditorInstallStateBySession = new Map<
 		string,
@@ -110,7 +111,9 @@ export default function suggester(pi: PromptSuggesterApi) {
 	}
 
 	function compositionKey(ctx: PromptSuggesterExtensionContext): string {
-		return `${resolveSessionCwd(ctx)}\u0000${resolveSessionKey(ctx)}`;
+		const key = `${resolveSessionCwd(ctx)}\u0000${resolveSessionKey(ctx)}`;
+		compositionKeysBySessionManager.set(ctx.sessionManager, key);
+		return key;
 	}
 
 	async function getComposition(
@@ -137,18 +140,41 @@ export default function suggester(pi: PromptSuggesterApi) {
 		return composition;
 	}
 
+	function isStaleExtensionContextError(error: unknown): boolean {
+		return (
+			error instanceof Error && error.message.includes("extension ctx is stale")
+		);
+	}
+
+	function tryCompositionKey(
+		ctx: PromptSuggesterExtensionContext,
+	): string | undefined {
+		try {
+			return compositionKey(ctx);
+		} catch (error) {
+			if (isStaleExtensionContextError(error)) {
+				return compositionKeysBySessionManager.get(ctx.sessionManager);
+			}
+			throw error;
+		}
+	}
+
 	async function clearRuntimeContext(
 		ctx: PromptSuggesterExtensionContext,
 	): Promise<void> {
-		const key = compositionKey(ctx);
+		const key = tryCompositionKey(ctx);
+		if (!key) return;
 		const compositionPromise = compositionPromises.get(key);
-		if (!compositionPromise) return;
 		try {
 			const composition = await compositionPromise;
-			if (isExtensionContext(ctx)) composition.runtimeRef.clearContext(ctx);
-			ghostEditorInstallStateBySession.delete(key);
+			if (composition && isExtensionContext(ctx)) {
+				composition.runtimeRef.clearContext(ctx);
+			}
 		} catch {
 			// If composition failed during startup, there is no runtime context to clear.
+		} finally {
+			ghostEditorInstallStateBySession.delete(key);
+			compositionPromises.delete(key);
 		}
 	}
 
@@ -165,7 +191,7 @@ export default function suggester(pi: PromptSuggesterApi) {
 		composition: AppComposition,
 	): void {
 		if (!isExtensionContext(ctx) || !ctx.hasUI) return;
-		syncGhostEditorInstallation(ctx, composition, resolveSessionKey(ctx));
+		syncGhostEditorInstallation(ctx, composition, compositionKey(ctx));
 		refreshSuggesterUi(getUiContext(composition));
 	}
 

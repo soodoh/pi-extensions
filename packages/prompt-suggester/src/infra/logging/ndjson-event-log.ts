@@ -49,22 +49,26 @@ export class NdjsonEventLog implements EventLog {
 	}
 
 	public async append(event: LoggedEvent): Promise<void> {
-		this.queue = this.queue.then(async () => {
-			const dir = path.dirname(this.filePath);
-			await ensurePrivateDirectory(dir);
-			const payload: LoggedEvent = {
-				...event,
-				meta: event.meta
-					? (sanitizeValue(event.meta, this.maxValueChars) as Record<
-							string,
-							unknown
-						>)
-					: undefined,
-			};
-			await appendPrivateFile(this.filePath, `${JSON.stringify(payload)}\n`);
-			await this.rotateIfNeeded();
-		});
-		await this.queue;
+		const write = this.queue
+			.catch(() => undefined)
+			.then(async () => {
+				const dir = path.dirname(this.filePath);
+				await ensurePrivateDirectory(dir);
+				const sanitizedMeta = event.meta
+					? sanitizeValue(event.meta, this.maxValueChars)
+					: undefined;
+				const payload: LoggedEvent = {
+					...event,
+					meta:
+						sanitizedMeta && typeof sanitizedMeta === "object"
+							? Object.fromEntries(Object.entries(sanitizedMeta))
+							: undefined,
+				};
+				await appendPrivateFile(this.filePath, `${JSON.stringify(payload)}\n`);
+				await this.rotateIfNeeded();
+			});
+		this.queue = write.catch(() => undefined);
+		await write;
 	}
 
 	private async rotateIfNeeded(): Promise<void> {

@@ -10,6 +10,7 @@ import {
 	addUsageStats,
 	cloneUsageStats,
 	emptyUsageStats,
+	normalizeFiniteNonNegativeNumber,
 	normalizeUsageStats,
 } from "../../domain/usage";
 import {
@@ -27,26 +28,19 @@ export function emptyUsagePair(): SuggestionUsageStatsPair {
 	};
 }
 
+function isObjectRecord(value: unknown): value is Record<PropertyKey, unknown> {
+	return typeof value === "object" && value !== null;
+}
+
 function parseUsage(raw: unknown): SuggestionUsage | undefined {
-	if (!raw || typeof raw !== "object") return undefined;
-	const usage = raw as Partial<SuggestionUsage>;
-	if (
-		typeof usage.inputTokens !== "number" ||
-		typeof usage.outputTokens !== "number" ||
-		typeof usage.cacheReadTokens !== "number" ||
-		typeof usage.cacheWriteTokens !== "number" ||
-		typeof usage.totalTokens !== "number" ||
-		typeof usage.costTotal !== "number"
-	) {
-		return undefined;
-	}
+	if (!isObjectRecord(raw)) return undefined;
 	return {
-		inputTokens: usage.inputTokens,
-		outputTokens: usage.outputTokens,
-		cacheReadTokens: usage.cacheReadTokens,
-		cacheWriteTokens: usage.cacheWriteTokens,
-		totalTokens: usage.totalTokens,
-		costTotal: usage.costTotal,
+		inputTokens: normalizeFiniteNonNegativeNumber(raw.inputTokens),
+		outputTokens: normalizeFiniteNonNegativeNumber(raw.outputTokens),
+		cacheReadTokens: normalizeFiniteNonNegativeNumber(raw.cacheReadTokens),
+		cacheWriteTokens: normalizeFiniteNonNegativeNumber(raw.cacheWriteTokens),
+		totalTokens: normalizeFiniteNonNegativeNumber(raw.totalTokens),
+		costTotal: normalizeFiniteNonNegativeNumber(raw.costTotal),
 	};
 }
 
@@ -63,9 +57,8 @@ export function normalizeInteractionState(
 		steeringHistory: Array.isArray(latest.steeringHistory)
 			? latest.steeringHistory
 			: [],
-		turnsSinceLastStalenessCheck: Math.max(
-			0,
-			Number(latest.turnsSinceLastStalenessCheck ?? 0),
+		turnsSinceLastStalenessCheck: normalizeFiniteNonNegativeNumber(
+			latest.turnsSinceLastStalenessCheck,
 		),
 	};
 }

@@ -1,9 +1,11 @@
-import { appendFile, chmod, mkdir, open, readFile } from "node:fs/promises";
+import { appendFile, chmod, mkdir, open } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
 const HISTORY_FILE_NAME = "prompt-history.jsonl";
 const TAIL_READ_CHUNK_SIZE = 8192;
+const DEFAULT_HISTORY_PROMPT_LIMIT = 200;
+const DEFAULT_HISTORY_TAIL_BYTES = 512 * 1024;
 const lastPersistedPromptByPath = new Map<string, string>();
 
 export interface PromptHistoryPathOptions {
@@ -80,28 +82,62 @@ async function readLastPrompt(
 	}
 }
 
+export interface ReadPromptHistoryOptions {
+	maxPrompts?: number;
+	maxBytes?: number;
+}
+
 export async function readPromptHistory(
 	historyPath = getPromptHistoryPath(),
+	options: ReadPromptHistoryOptions = {},
 ): Promise<string[]> {
-	let contents: string;
-
+	const maxPrompts = Math.max(
+		1,
+		Math.floor(options.maxPrompts ?? DEFAULT_HISTORY_PROMPT_LIMIT),
+	);
+	const maxBytes = Math.max(
+		TAIL_READ_CHUNK_SIZE,
+		Math.floor(options.maxBytes ?? DEFAULT_HISTORY_TAIL_BYTES),
+	);
+	let file: Awaited<ReturnType<typeof open>>;
 	try {
-		contents = await readFile(historyPath, "utf8");
+		file = await open(historyPath, "r");
 	} catch (error) {
 		if (isNotFoundError(error)) return [];
 		throw error;
 	}
 
-	const prompts: string[] = [];
+	try {
+		const { size } = await file.stat();
+		let position = size;
+		let remainingBytes = maxBytes;
+		let text = "";
+		const prompts: string[] = [];
 
-	for (const line of contents.split("\n")) {
-		const parsed = parsePromptLine(line);
-		if (parsed) prompts.push(parsed);
+		while (position > 0 && remainingBytes > 0 && prompts.length < maxPrompts) {
+			const length = Math.min(TAIL_READ_CHUNK_SIZE, position, remainingBytes);
+			position -= length;
+			remainingBytes -= length;
+			const buffer = Buffer.alloc(length);
+			const { bytesRead } = await file.read(buffer, 0, length, position);
+			text = `${buffer.subarray(0, bytesRead).toString("utf8")}${text}`;
+			const lines = text.split("\n");
+			const completeLines = position === 0 ? lines : lines.slice(1);
+			for (let index = completeLines.length - 1; index >= 0; index -= 1) {
+				const parsed = parsePromptLine(completeLines[index]);
+				if (parsed) prompts.push(parsed);
+				if (prompts.length >= maxPrompts) break;
+			}
+			text = position === 0 ? "" : (lines[0] ?? "");
+		}
+
+		const orderedPrompts = prompts.reverse();
+		const lastPrompt = orderedPrompts.at(-1);
+		if (lastPrompt) lastPersistedPromptByPath.set(historyPath, lastPrompt);
+		return orderedPrompts;
+	} finally {
+		await file.close();
 	}
-
-	const lastPrompt = prompts.at(-1);
-	if (lastPrompt) lastPersistedPromptByPath.set(historyPath, lastPrompt);
-	return prompts;
 }
 
 export interface AppendPromptOptions {

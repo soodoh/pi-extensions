@@ -87,3 +87,41 @@ test("normalizeUsageStats falls back to zeros for missing data", () => {
 		last: undefined,
 	});
 });
+
+test("normalizeUsageStats rejects non-finite and negative persisted numbers", () => {
+	expect(
+		normalizeUsageStats({
+			calls: Number.NaN,
+			inputTokens: Number.POSITIVE_INFINITY,
+			outputTokens: -1,
+			cacheReadTokens: 4,
+			cacheWriteTokens: "5",
+			totalTokens: null,
+			costTotal: -0.1,
+			last: {
+				inputTokens: Number.NEGATIVE_INFINITY,
+				outputTokens: 2,
+				cacheReadTokens: -3,
+				cacheWriteTokens: 1,
+				totalTokens: Number.NaN,
+				costTotal: 0.25,
+			},
+		}),
+	).toEqual({
+		calls: 0,
+		inputTokens: 0,
+		outputTokens: 0,
+		cacheReadTokens: 4,
+		cacheWriteTokens: 5,
+		totalTokens: 0,
+		costTotal: 0,
+		last: {
+			inputTokens: 0,
+			outputTokens: 2,
+			cacheReadTokens: 0,
+			cacheWriteTokens: 1,
+			totalTokens: 0,
+			costTotal: 0.25,
+		},
+	});
+});

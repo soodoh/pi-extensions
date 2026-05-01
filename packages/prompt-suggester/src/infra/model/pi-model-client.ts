@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
-import { promises as fs } from "node:fs";
+import { createReadStream, promises as fs } from "node:fs";
 import path from "node:path";
+import { createInterface } from "node:readline";
 import { promisify } from "node:util";
 import {
 	type ThinkingLevel as AiThinkingLevel,
@@ -40,10 +41,17 @@ const IGNORED_DIRS = new Set([
 	".git",
 	"node_modules",
 	".pi",
+	".turbo",
+	".pi-lens",
+	".ralph",
 	"dist",
 	"build",
 	"coverage",
 ]);
+
+export function shouldIgnoreSeederDir(name: string): boolean {
+	return IGNORED_DIRS.has(name);
+}
 const CLAUDE_BRIDGE_STREAM_SIMPLE_KEY = Symbol.for(
 	"claude-bridge:activeStreamSimple",
 );
@@ -1008,6 +1016,9 @@ export class PiModelClient implements ModelClient {
 		const limit = Math.min(500, Math.max(1, Number(args.limit ?? 200)));
 		const entries = await fs.readdir(absolute, { withFileTypes: true });
 		const lines = entries
+			.filter(
+				(entry) => !entry.isDirectory() || !shouldIgnoreSeederDir(entry.name),
+			)
 			.sort((a, b) => a.name.localeCompare(b.name))
 			.slice(0, limit)
 			.map(
@@ -1035,7 +1046,7 @@ export class PiModelClient implements ModelClient {
 			for (const entry of entries) {
 				if (results.length >= limit) break;
 				if (entry.isDirectory()) {
-					if (IGNORED_DIRS.has(entry.name)) continue;
+					if (shouldIgnoreSeederDir(entry.name)) continue;
 					await walk(path.join(dir, entry.name));
 					continue;
 				}
@@ -1098,17 +1109,45 @@ export class PiModelClient implements ModelClient {
 		}
 	}
 
+	private parsePositiveInteger(
+		value: unknown,
+		fallback: number,
+		max?: number,
+	): number {
+		const parsed = Number(value ?? fallback);
+		const bounded = Number.isFinite(parsed) ? Math.floor(parsed) : fallback;
+		const positive = Math.max(1, bounded);
+		return max === undefined ? positive : Math.min(max, positive);
+	}
+
 	private async toolRead(args: Record<string, unknown>): Promise<string> {
 		const absolute = await this.resolvePath(args.path);
-		const offset = Math.max(1, Number(args.offset ?? 1));
-		const limit = Math.min(1200, Math.max(1, Number(args.limit ?? 220)));
-		const raw = await fs.readFile(absolute, "utf8");
-		const lines = raw.split(/\r?\n/);
-		const start = offset - 1;
-		const sliced = lines.slice(start, start + limit);
-		const numbered = sliced.map(
-			(line, index) => `${start + index + 1}: ${line}`,
-		);
+		const offset = this.parsePositiveInteger(args.offset, 1);
+		const limit = this.parsePositiveInteger(args.limit, 220, 1200);
+		const numbered: string[] = [];
+		let lineNumber = 0;
+		const stream = createReadStream(absolute, { encoding: "utf8" });
+		const lines = createInterface({
+			input: stream,
+			crlfDelay: Number.POSITIVE_INFINITY,
+		});
+
+		try {
+			for await (const line of lines) {
+				lineNumber += 1;
+				if (lineNumber < offset) continue;
+				numbered.push(`${lineNumber}: ${line}`);
+				if (numbered.length >= limit) {
+					lines.close();
+					stream.destroy();
+					break;
+				}
+			}
+		} finally {
+			lines.close();
+			stream.destroy();
+		}
+
 		return truncate(numbered.join("\n") || "(empty)", 12000);
 	}
 }

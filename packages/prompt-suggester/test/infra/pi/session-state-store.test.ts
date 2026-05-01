@@ -143,3 +143,26 @@ test("SessionStateStore writes persistent files under the provided project state
 	expect(state.lastSuggestion?.text).toBe("Persist me");
 	expect(state.suggestionUsage.calls).toBe(1);
 });
+
+test("session state normalization rejects non-finite and negative persisted numbers", async () => {
+	const data = await import("../../../src/infra/pi/session-state-data");
+
+	expect(
+		data.normalizeInteractionState({
+			turnsSinceLastStalenessCheck: Number.POSITIVE_INFINITY,
+		}),
+	).toMatchObject({ turnsSinceLastStalenessCheck: 0 });
+	expect(
+		data.normalizeInteractionState({ turnsSinceLastStalenessCheck: -3 }),
+	).toMatchObject({ turnsSinceLastStalenessCheck: 0 });
+
+	expect(
+		data.normalizePersistedUsagePair({
+			suggestionUsage: { calls: -1, inputTokens: Number.NaN },
+			seederUsage: { calls: 2, costTotal: Number.NEGATIVE_INFINITY },
+		}),
+	).toMatchObject({
+		suggester: { calls: 0, inputTokens: 0 },
+		seeder: { calls: 2, costTotal: 0 },
+	});
+});

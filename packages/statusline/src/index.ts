@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { resolve } from "node:path";
 
 type Theme = {
 	fg(color: string, text: string): string;
@@ -85,6 +86,7 @@ type ExtensionContext = {
 	};
 	sessionManager?: {
 		getBranch?(): unknown[];
+		getCwd?(): string;
 	};
 	model?: ModelLike;
 	modelRegistry?: ModelRegistryLike;
@@ -251,11 +253,13 @@ const PROVIDER_FAMILY_ORDER = [
 	"google-antigravity",
 ];
 
-let cachedStatus: (Omit<GitStatus, "branch"> & { timestamp: number }) | null =
-	null;
-let cachedBranch: { branch: string | null; timestamp: number } | null = null;
-let pendingStatusFetch: Promise<void> | null = null;
-let pendingBranchFetch: Promise<void> | null = null;
+type GitStatusCacheEntry = Omit<GitStatus, "branch"> & { timestamp: number };
+type GitBranchCacheEntry = { branch: string | null; timestamp: number };
+
+const cachedStatusByCwd = new Map<string, GitStatusCacheEntry>();
+const cachedBranchByCwd = new Map<string, GitBranchCacheEntry>();
+const pendingStatusFetchByCwd = new Map<string, Promise<void>>();
+const pendingBranchFetchByCwd = new Map<string, Promise<void>>();
 let statusInvalidation = 0;
 let branchInvalidation = 0;
 const providerUsageCache = new Map<string, ProviderUsageCacheEntry>();
@@ -325,9 +329,16 @@ function displayLength(text: string): number {
 	return Array.from(stripAnsi(text)).length;
 }
 
-function runGit(args: string[], timeoutMs = 200): Promise<string | null> {
+function runGit(
+	cwd: string,
+	args: string[],
+	timeoutMs = 200,
+): Promise<string | null> {
 	return new Promise((resolve) => {
-		const proc = spawn("git", args, { stdio: ["ignore", "pipe", "pipe"] });
+		const proc = spawn("git", args, {
+			cwd,
+			stdio: ["ignore", "pipe", "pipe"],
+		});
 		let stdout = "";
 		let resolved = false;
 
@@ -372,63 +383,75 @@ function parseGitStatus(output: string): Omit<GitStatus, "branch"> {
 	return { staged, unstaged, untracked };
 }
 
-async function fetchGitBranch(): Promise<string | null> {
-	const branch = await runGit(["branch", "--show-current"]);
+async function fetchGitBranch(cwd: string): Promise<string | null> {
+	const branch = await runGit(cwd, ["branch", "--show-current"]);
 	if (branch === null) return null;
 	if (branch) return branch;
 
-	const sha = await runGit(["rev-parse", "--short", "HEAD"]);
+	const sha = await runGit(cwd, ["rev-parse", "--short", "HEAD"]);
 	return sha ? `${sha} (detached)` : "detached";
 }
 
 function getCurrentBranch(
+	cwd: string,
 	providerBranch: string | null,
 	onUpdate: () => void,
 ): string | null {
 	const now = Date.now();
+	const cachedBranch = cachedBranchByCwd.get(cwd);
 	if (cachedBranch && now - cachedBranch.timestamp < BRANCH_TTL_MS) {
 		return cachedBranch.branch;
 	}
 
-	if (!pendingBranchFetch) {
+	if (!pendingBranchFetchByCwd.has(cwd)) {
 		const fetchId = branchInvalidation;
-		pendingBranchFetch = fetchGitBranch().then((result) => {
+		const pending = fetchGitBranch(cwd).then((result) => {
 			if (fetchId === branchInvalidation) {
-				cachedBranch = { branch: result, timestamp: Date.now() };
+				cachedBranchByCwd.set(cwd, {
+					branch: result,
+					timestamp: Date.now(),
+				});
 				onUpdate();
 			}
-			pendingBranchFetch = null;
+			pendingBranchFetchByCwd.delete(cwd);
 		});
+		pendingBranchFetchByCwd.set(cwd, pending);
 	}
 
 	return cachedBranch ? cachedBranch.branch : providerBranch;
 }
 
 function getGitStatus(
+	cwd: string,
 	providerBranch: string | null,
 	onUpdate: () => void,
 ): GitStatus {
 	const now = Date.now();
-	const branch = getCurrentBranch(providerBranch, onUpdate);
+	const branch = getCurrentBranch(cwd, providerBranch, onUpdate);
+	const cachedStatus = cachedStatusByCwd.get(cwd);
 
 	if (cachedStatus && now - cachedStatus.timestamp < CACHE_TTL_MS) {
 		return { branch, ...cachedStatus };
 	}
 
-	if (!pendingStatusFetch) {
+	if (!pendingStatusFetchByCwd.has(cwd)) {
 		const fetchId = statusInvalidation;
-		pendingStatusFetch = runGit(["status", "--porcelain"], 500).then(
+		const pending = runGit(cwd, ["status", "--porcelain"], 500).then(
 			(output) => {
 				if (fetchId === statusInvalidation) {
 					const parsed = output
 						? parseGitStatus(output)
 						: { staged: 0, unstaged: 0, untracked: 0 };
-					cachedStatus = { ...parsed, timestamp: Date.now() };
+					cachedStatusByCwd.set(cwd, {
+						...parsed,
+						timestamp: Date.now(),
+					});
 					onUpdate();
 				}
-				pendingStatusFetch = null;
+				pendingStatusFetchByCwd.delete(cwd);
 			},
 		);
+		pendingStatusFetchByCwd.set(cwd, pending);
 	}
 
 	return cachedStatus
@@ -437,8 +460,10 @@ function getGitStatus(
 }
 
 function invalidateGit(): void {
-	cachedStatus = null;
-	cachedBranch = null;
+	cachedStatusByCwd.clear();
+	cachedBranchByCwd.clear();
+	pendingStatusFetchByCwd.clear();
+	pendingBranchFetchByCwd.clear();
 	statusInvalidation++;
 	branchInvalidation++;
 }
@@ -1290,6 +1315,10 @@ function formatLine(parts: (string | undefined)[]): string {
 	return ` ${visibleParts.join(` ${SEPARATOR_COLOR}${separator()}${ANSI_RESET} `)}${ANSI_RESET} `;
 }
 
+function sessionCwd(ctx: ExtensionContext): string {
+	return resolve(ctx.sessionManager?.getCwd?.() ?? process.cwd());
+}
+
 function buildCompactLine(
 	ctx: ExtensionContext,
 	theme: Theme,
@@ -1302,7 +1331,7 @@ function buildCompactLine(
 
 	const contextTokens = collectContextTokens(ctx);
 	const providerBranch = footerData?.getGitBranch() ?? null;
-	const git = getGitStatus(providerBranch, onUpdate);
+	const git = getGitStatus(sessionCwd(ctx), providerBranch, onUpdate);
 	const modelPart = renderModel(ctx, theme);
 	const gitPart = renderGit(git, theme);
 	const contextPart = renderContext(ctx, contextTokens, theme);

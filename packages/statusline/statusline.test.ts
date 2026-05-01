@@ -1,5 +1,12 @@
+import { execFile } from "node:child_process";
+import { mkdtemp, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { promisify } from "node:util";
 import { describe, expect, test, vi } from "vitest";
 import statusline from "./index";
+
+const execFileAsync = promisify(execFile);
 
 type Handler = (event: Record<string, unknown>, ctx: StatuslineContext) => void;
 type Widget = {
@@ -41,7 +48,7 @@ type StatuslineContext = {
 			): { type: "oauth"; access?: string; refresh?: string } | undefined;
 		};
 	};
-	sessionManager: { getBranch(): unknown[] };
+	sessionManager: { getBranch(): unknown[]; getCwd?(): string };
 	settingsManager: { getCompactionSettings(): { enabled: boolean } };
 	getContextUsage(): { tokens: number; contextWindow: number; percent: number };
 };
@@ -175,5 +182,68 @@ describe("statusline extension", () => {
 		} finally {
 			vi.unstubAllGlobals();
 		}
+	});
+
+	test("scopes git status cache by active session cwd", async () => {
+		const repoOne = await mkdtemp(join(tmpdir(), "pi-statusline-repo-one-"));
+		const repoTwo = await mkdtemp(join(tmpdir(), "pi-statusline-repo-two-"));
+		for (const repo of [repoOne, repoTwo]) {
+			await execFileAsync("git", ["init"], { cwd: repo });
+			await execFileAsync("git", ["config", "user.email", "test@example.com"], {
+				cwd: repo,
+			});
+			await execFileAsync("git", ["config", "user.name", "Test User"], {
+				cwd: repo,
+			});
+			await writeFile(join(repo, "tracked.txt"), "initial\n", "utf8");
+			await execFileAsync("git", ["add", "tracked.txt"], { cwd: repo });
+			await execFileAsync("git", ["commit", "-m", "initial"], { cwd: repo });
+		}
+		await writeFile(join(repoOne, "tracked.txt"), "modified\n", "utf8");
+		const { stdout: repoTwoBranchOutput } = await execFileAsync(
+			"git",
+			["branch", "--show-current"],
+			{ cwd: repoTwo },
+		);
+		const repoTwoBranch = repoTwoBranchOutput.trim();
+
+		let widgetFactory: WidgetFactory | undefined;
+		const pi = createPi();
+		statusline(pi);
+		const makeCtx = (cwd: string): StatuslineContext => ({
+			hasUI: true,
+			ui: {
+				setFooter() {},
+				setWidget(_key, factory) {
+					widgetFactory = factory;
+				},
+			},
+			model: { name: "Test Model", contextWindow: 1000 },
+			modelRegistry: {
+				getAvailable() {
+					return [];
+				},
+				async getApiKeyForProvider() {
+					return undefined;
+				},
+			},
+			sessionManager: { getBranch: () => [], getCwd: () => cwd },
+			settingsManager: { getCompactionSettings: () => ({ enabled: true }) },
+			getContextUsage: () => ({ tokens: 0, contextWindow: 1000, percent: 0 }),
+		});
+
+		pi.handlers.get("session_start")?.({}, makeCtx(repoOne));
+		const widget = widgetFactory?.(
+			{},
+			{ fg: (_color: string, text: string) => text },
+		);
+		if (!widget) throw new Error("expected statusline widget");
+		const render = () => widget.render(120).join("\n");
+		render();
+		await vi.waitFor(() => expect(render()).toMatch(/[+*]1/));
+
+		pi.handlers.get("session_start")?.({}, makeCtx(repoTwo));
+		await vi.waitFor(() => expect(render()).toContain(repoTwoBranch));
+		expect(render()).not.toMatch(/[+*]1/);
 	});
 });

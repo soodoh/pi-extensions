@@ -103,6 +103,24 @@ describe("shared prompt history store", () => {
 		]);
 	});
 
+	test("reads only a bounded tail while appends still use the latest prompt", async () => {
+		const dir = await makeTempDir();
+		const historyPath = join(dir, "prompt-history.jsonl");
+		const records = Array.from({ length: 10 }, (_, index) =>
+			JSON.stringify({ prompt: `prompt-${index + 1}` }),
+		).join("\n");
+		await writeFile(historyPath, `${records}\n`, "utf8");
+
+		await expect(
+			readPromptHistory(historyPath, { maxPrompts: 3 }),
+		).resolves.toEqual(["prompt-8", "prompt-9", "prompt-10"]);
+		await expect(appendPrompt("prompt-10", historyPath)).resolves.toBe(false);
+		await expect(appendPrompt("prompt-11", historyPath)).resolves.toBe(true);
+		await expect(
+			readPromptHistory(historyPath, { maxPrompts: 2 }),
+		).resolves.toEqual(["prompt-10", "prompt-11"]);
+	});
+
 	test("propagates filesystem errors other than a missing history file", async () => {
 		const dir = await makeTempDir();
 

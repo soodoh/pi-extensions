@@ -1,4 +1,4 @@
-import { mkdtemp, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -438,4 +438,128 @@ test("PiModelClient still rejects empty text for seeder", async (t) => {
 			previousSeed: null,
 		}),
 	).rejects.toThrow(/Model returned empty text/);
+});
+async function runSeederToolPreview(
+	cwd: string,
+	tool: string,
+	args: Record<string, unknown>,
+): Promise<string> {
+	let callCount = 0;
+	const api = `test-api-${Math.random().toString(36).slice(2)}`;
+	const sourceId = `test-provider-${Math.random().toString(36).slice(2)}`;
+	registerApiProvider(
+		{
+			api,
+			stream() {
+				throw new Error("stream should not be used in these tests");
+			},
+			streamSimple() {
+				callCount += 1;
+				return {
+					async result() {
+						return successResponse(
+							callCount === 1
+								? JSON.stringify({ type: "tool", tool, arguments: args })
+								: JSON.stringify({
+										type: "final",
+										seed: {
+											projectIntentSummary: "Test project",
+											objectivesSummary: "Exercise tool",
+											constraintsSummary: "Keep tests small",
+											principlesGuidelinesSummary: "Use fixtures",
+											implementationStatusSummary: "Ready",
+											topObjectives: ["Exercise tool"],
+											constraints: ["Keep tests small"],
+											keyFiles: [
+												{
+													path: "visible.txt",
+													category: "vision",
+													whyImportant: "Fixture file",
+												},
+											],
+											categoryFindings: {
+												vision: { found: true, rationale: "fixture file" },
+												architecture: { found: false, rationale: "not needed" },
+												principles_guidelines: {
+													found: false,
+													rationale: "not needed",
+												},
+											},
+										},
+									}),
+						);
+					},
+				};
+			},
+		},
+		sourceId,
+	);
+	const previews: string[] = [];
+	const logger: Logger = {
+		debug() {},
+		info(_message, meta) {
+			if (typeof meta?.toolResultPreview === "string") {
+				previews.push(meta.toolResultPreview);
+			}
+		},
+		warn() {},
+		error() {},
+	};
+	try {
+		const model = createModel(api);
+		const client = new PiModelClient(
+			createRuntimeWithModel(model),
+			logger,
+			cwd,
+		);
+		await client.generateSeed({
+			reseedTrigger: { reason: "manual", changedFiles: [] },
+			previousSeed: null,
+		});
+		return previews.join("\n");
+	} finally {
+		unregisterApiProviders(sourceId);
+	}
+}
+
+test("PiModelClient ls and find tools ignore local cache directories", async () => {
+	const cwd = await mkdtemp(join(tmpdir(), "pi-suggester-ignore-"));
+	await mkdir(join(cwd, ".turbo"));
+	await mkdir(join(cwd, ".pi-lens"));
+	await mkdir(join(cwd, ".ralph"));
+	await writeFile(join(cwd, "visible.txt"), "visible\n", "utf8");
+	await writeFile(join(cwd, ".turbo", "hidden.txt"), "hidden\n", "utf8");
+	await writeFile(join(cwd, ".pi-lens", "hidden.txt"), "hidden\n", "utf8");
+	await writeFile(join(cwd, ".ralph", "hidden.txt"), "hidden\n", "utf8");
+
+	const lsPreview = await runSeederToolPreview(cwd, "ls", { path: "." });
+	const findPreview = await runSeederToolPreview(cwd, "find", {
+		path: ".",
+		pattern: "hidden.txt",
+	});
+
+	expect(lsPreview).toContain("visible.txt");
+	expect(lsPreview).not.toContain(".turbo");
+	expect(lsPreview).not.toContain(".pi-lens");
+	expect(lsPreview).not.toContain(".ralph");
+	expect(findPreview).toContain("(no matches)");
+});
+
+test("PiModelClient read tool returns a bounded slice for large files", async () => {
+	const cwd = await mkdtemp(join(tmpdir(), "pi-suggester-read-"));
+	const largePath = join(cwd, "large.txt");
+	const lines = Array.from({ length: 5000 }, (_, index) => `line-${index + 1}`);
+	await writeFile(largePath, lines.join("\n"), "utf8");
+	await writeFile(join(cwd, "visible.txt"), "visible\n", "utf8");
+
+	const preview = await runSeederToolPreview(cwd, "read", {
+		path: "large.txt",
+		offset: 2500,
+		limit: 3,
+	});
+
+	expect(preview).toContain("2500: line-2500");
+	expect(preview).toContain("2502: line-2502");
+	expect(preview).not.toContain("2499: line-2499");
+	expect(preview).not.toContain("2503: line-2503");
 });

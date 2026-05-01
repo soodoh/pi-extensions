@@ -303,9 +303,15 @@ export class WorkflowRunner {
 	async continueExecution(runId: string, ctx: WorkflowContext): Promise<void> {
 		const run = await getRun(runId);
 		if (!run) throw new Error(`Unknown workflow run: ${runId}`);
-		if (run.phase !== "approved" && run.phase !== "executing")
+		if (run.phase === "executing") {
+			if (run.executionSessionPath) return;
 			throw new Error(
-				`Workflow run ${runId} is ${run.phase}; approve the plan before executing or resuming.`,
+				`Workflow run ${runId} is already executing without a recorded execution session; refusing to create a duplicate session.`,
+			);
+		}
+		if (run.phase !== "approved")
+			throw new Error(
+				`Workflow run ${runId} is ${run.phase}; approve the plan before executing.`,
 			);
 		if (!run.planPath) throw new Error(`Workflow run ${runId} has no planPath`);
 		const full = await ensureRealPathInsideCwd(run.cwd, run.planPath);

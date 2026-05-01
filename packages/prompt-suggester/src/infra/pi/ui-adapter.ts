@@ -60,30 +60,34 @@ export class PiSuggestionSink implements SuggestionSink {
 	public async showSuggestion(
 		text: string,
 		options?: { restore?: boolean; generationId?: number },
-	): Promise<void> {
+	): Promise<boolean> {
 		if (
 			options?.generationId !== undefined &&
 			options.generationId !== this.runtime.getEpoch()
-		)
-			return;
-		if (!getActiveUiContext(this.runtime)) return;
+		) {
+			return false;
+		}
+		if (!getActiveUiContext(this.runtime)) return false;
 
 		this.runtime.setSuggestion(text);
 		this.runtime.setPanelSuggestionStatus(undefined);
 		refreshSuggesterUi(this.runtime);
+		return true;
 	}
 
 	public async clearSuggestion(options?: {
 		generationId?: number;
-	}): Promise<void> {
+	}): Promise<boolean> {
 		if (
 			options?.generationId !== undefined &&
 			options.generationId !== this.runtime.getEpoch()
-		)
-			return;
+		) {
+			return false;
+		}
 		this.runtime.setSuggestion(undefined);
 		this.runtime.setPanelSuggestionStatus(undefined);
 		refreshSuggesterUi(this.runtime);
+		return true;
 	}
 
 	public async setUsage(_usage: {

@@ -128,8 +128,11 @@ test("TurnEndOrchestrator records usage and persists transcript-steering suggest
 		suggestionSink: {
 			async showSuggestion(text) {
 				shown.push(text);
+				return true;
 			},
-			async clearSuggestion() {},
+			async clearSuggestion() {
+				return true;
+			},
 			async setUsage() {},
 		},
 		logger: {
@@ -193,4 +196,84 @@ test("TurnEndOrchestrator records usage and persists transcript-steering suggest
 				entry.meta?.variantName === "default",
 		),
 	).toBe(true);
+});
+test("TurnEndOrchestrator does not persist stale generation suggestions", async () => {
+	let saved = false;
+	const usageCalls: UsageCall[] = [];
+	const orchestrator = new TurnEndOrchestrator({
+		config: createConfig(),
+		seedStore: {
+			async load() {
+				return null;
+			},
+		},
+		stateStore: {
+			async load() {
+				return INITIAL_RUNTIME_STATE;
+			},
+			async save() {
+				saved = true;
+			},
+			async recordUsage(kind, usage) {
+				usageCalls.push({ kind, usage });
+			},
+		},
+		stalenessChecker: {
+			async check() {
+				return { stale: false, trigger: undefined };
+			},
+		},
+		reseedRunner: { async trigger() {} },
+		suggestionEngine: {
+			async suggest() {
+				return {
+					kind: "suggestion",
+					text: "Stale suggestion",
+					usage: {
+						inputTokens: 1,
+						outputTokens: 1,
+						cacheReadTokens: 0,
+						cacheWriteTokens: 0,
+						totalTokens: 2,
+						costTotal: 0,
+					},
+					metadata: {
+						requestedStrategy: "transcript-steering",
+						strategy: "transcript-steering",
+					},
+				};
+			},
+		},
+		suggestionSink: {
+			async showSuggestion() {
+				return false;
+			},
+			async clearSuggestion() {
+				return false;
+			},
+			async setUsage() {},
+		},
+		logger: {
+			debug() {},
+			info() {},
+			warn() {},
+			error() {},
+		},
+		checkForStaleness: false,
+	});
+
+	await orchestrator.handle({
+		turnId: "turn-stale",
+		sourceLeafId: "leaf-stale",
+		assistantText: "Done.",
+		status: "success",
+		occurredAt: "2026-03-15T00:02:00.000Z",
+		recentUserPrompts: ["Run it"],
+		toolSignals: [],
+		touchedFiles: [],
+		unresolvedQuestions: [],
+	});
+
+	expect(saved).toBe(false);
+	expect(usageCalls).toHaveLength(1);
 });

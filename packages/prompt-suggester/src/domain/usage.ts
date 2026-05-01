@@ -70,19 +70,47 @@ export function cloneUsageStats(
 	};
 }
 
+function isObjectRecord(value: unknown): value is Record<PropertyKey, unknown> {
+	return typeof value === "object" && value !== null;
+}
+
+export function normalizeFiniteNonNegativeNumber(
+	value: unknown,
+	fallback = 0,
+): number {
+	const numeric = typeof value === "number" ? value : Number(value ?? fallback);
+	return Number.isFinite(numeric) && numeric >= 0 ? numeric : fallback;
+}
+
+function normalizeUsage(raw: unknown, fallback: SuggestionUsageStats) {
+	return isObjectRecord(raw) ? raw : fallback;
+}
+
+function normalizeLastUsage(raw: unknown): SuggestionUsage | undefined {
+	if (!isObjectRecord(raw)) return undefined;
+	return {
+		inputTokens: normalizeFiniteNonNegativeNumber(raw.inputTokens),
+		outputTokens: normalizeFiniteNonNegativeNumber(raw.outputTokens),
+		cacheReadTokens: normalizeFiniteNonNegativeNumber(raw.cacheReadTokens),
+		cacheWriteTokens: normalizeFiniteNonNegativeNumber(raw.cacheWriteTokens),
+		totalTokens: normalizeFiniteNonNegativeNumber(raw.totalTokens),
+		costTotal: normalizeFiniteNonNegativeNumber(raw.costTotal),
+	};
+}
+
 export function normalizeUsageStats(
 	raw: unknown,
 	fallback: SuggestionUsageStats = emptyUsageStats(),
 ): SuggestionUsageStats {
-	const usage = (raw ?? fallback) as Partial<SuggestionUsageStats>;
+	const usage = normalizeUsage(raw, fallback);
 	return {
-		calls: Number(usage.calls ?? 0),
-		inputTokens: Number(usage.inputTokens ?? 0),
-		outputTokens: Number(usage.outputTokens ?? 0),
-		cacheReadTokens: Number(usage.cacheReadTokens ?? 0),
-		cacheWriteTokens: Number(usage.cacheWriteTokens ?? 0),
-		totalTokens: Number(usage.totalTokens ?? 0),
-		costTotal: Number(usage.costTotal ?? 0),
-		last: usage.last,
+		calls: normalizeFiniteNonNegativeNumber(usage.calls),
+		inputTokens: normalizeFiniteNonNegativeNumber(usage.inputTokens),
+		outputTokens: normalizeFiniteNonNegativeNumber(usage.outputTokens),
+		cacheReadTokens: normalizeFiniteNonNegativeNumber(usage.cacheReadTokens),
+		cacheWriteTokens: normalizeFiniteNonNegativeNumber(usage.cacheWriteTokens),
+		totalTokens: normalizeFiniteNonNegativeNumber(usage.totalTokens),
+		costTotal: normalizeFiniteNonNegativeNumber(usage.costTotal),
+		last: normalizeLastUsage(usage.last),
 	};
 }

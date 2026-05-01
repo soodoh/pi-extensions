@@ -75,6 +75,25 @@ async function registerExtension(ctx: TestContext, historyPath: string) {
 	await sessionStart?.({}, ctx);
 }
 
+async function waitForFileContaining(
+	filePath: string,
+	text: string,
+): Promise<void> {
+	const deadline = Date.now() + 1000;
+	let lastError: unknown;
+	while (Date.now() < deadline) {
+		try {
+			const contents = await readFile(filePath, "utf8");
+			if (contents.includes(text)) return;
+		} catch (error) {
+			lastError = error;
+		}
+		await new Promise((resolve) => setTimeout(resolve, 5));
+	}
+	if (lastError) throw lastError;
+	throw new Error(`Timed out waiting for ${filePath} to contain ${text}`);
+}
+
 async function createEditor(
 	historyPath: string,
 	onSubmit?: (text: string) => void | Promise<void>,
@@ -109,7 +128,7 @@ describe("shared prompt history extension", () => {
 			const editor = await createEditor(tempHistory.historyPath);
 
 			editor.addToHistory("expanded session prompt replayed on startup");
-			await new Promise((resolve) => setTimeout(resolve, 10));
+			await new Promise<void>((resolve) => queueMicrotask(() => resolve()));
 
 			await expect(
 				readFile(tempHistory.historyPath, "utf8"),
@@ -130,11 +149,7 @@ describe("shared prompt history extension", () => {
 			);
 
 			await editor.onSubmit?.("submitted prompt");
-			await new Promise((resolve) => setTimeout(resolve, 10));
-
-			await expect(
-				readFile(tempHistory.historyPath, "utf8"),
-			).resolves.toContain("submitted prompt");
+			await waitForFileContaining(tempHistory.historyPath, "submitted prompt");
 		} finally {
 			await rm(tempHistory.home, { recursive: true, force: true });
 		}

@@ -23,6 +23,7 @@ export interface GhostSuggestionDecoratorOptions {
 	getSuggestionRevision: () => number;
 	ghostAcceptKeys: readonly GhostAcceptKey[];
 	ghostAcceptAndSendKeys: readonly GhostAcceptKey[];
+	prefillOnlyWhenEditorEmpty: boolean;
 	isActive: () => boolean;
 }
 
@@ -205,6 +206,7 @@ class GhostSuggestionDecorator {
 
 		if (!suggestion || this.suppressGhost) return undefined;
 		const text = this.editor.getText();
+		if (options.prefillOnlyWhenEditorEmpty && text.length > 0) return undefined;
 		const cursor = this.editor.getCursor();
 		if (text.includes("\n")) return undefined;
 		if (cursor.line !== 0 || cursor.col !== text.length) return undefined;

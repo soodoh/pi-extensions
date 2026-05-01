@@ -3,5 +3,6 @@ dist/
 coverage/
 .turbo/
 .pi-lens/
+.ralph/
 *.tsbuildinfo
 .DS_Store

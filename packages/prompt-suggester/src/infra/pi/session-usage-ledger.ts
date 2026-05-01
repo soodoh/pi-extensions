@@ -21,11 +21,16 @@ export class SessionUsageLedger {
 	public async load(
 		context: Extract<SessionStorageContext, { persistent: true }>,
 	): Promise<SuggestionUsageStatsPair> {
-		const persisted = await readJsonIfExists<PersistedUsageState>(
-			context.usageFile,
-		);
-		if (!persisted) return emptyUsagePair();
-		return normalizePersistedUsagePair(persisted);
+		try {
+			const persisted = await readJsonIfExists<PersistedUsageState>(
+				context.usageFile,
+			);
+			if (!persisted) return emptyUsagePair();
+			return normalizePersistedUsagePair(persisted);
+		} catch (error) {
+			if (error instanceof SyntaxError) return emptyUsagePair();
+			throw error;
+		}
 	}
 
 	public async record(

@@ -15,7 +15,8 @@
 			"!**/dist",
 			"!**/node_modules",
 			"!**/.turbo",
-			"!**/.pi-lens"
+			"!**/.pi-lens",
+			"!**/.ralph"
 		]
 	},
 	"formatter": {

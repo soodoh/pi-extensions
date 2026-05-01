@@ -1,10 +1,20 @@
-import { access, mkdtemp, stat } from "node:fs/promises";
+import {
+	access,
+	mkdir,
+	mkdtemp,
+	readFile,
+	stat,
+	writeFile,
+} from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { expect, test } from "vitest";
 import { INITIAL_RUNTIME_STATE } from "../../../src/domain/state";
 import { SessionStateStore } from "../../../src/infra/pi/session-state-store";
-import type { SessionReadableManager } from "../../../src/infra/pi/session-state-types";
+import {
+	type SessionReadableManager,
+	STORE_SCHEMA_VERSION,
+} from "../../../src/infra/pi/session-state-types";
 import {
 	createSessionStorageContext,
 	stateFilePath,
@@ -142,6 +152,91 @@ test("SessionStateStore writes persistent files under the provided project state
 	const state = await store.load();
 	expect(state.lastSuggestion?.text).toBe("Persist me");
 	expect(state.suggestionUsage.calls).toBe(1);
+});
+
+test("SessionStateStore recovers from corrupt interaction state JSON", async () => {
+	const cwd = await mkdtemp(
+		path.join(os.tmpdir(), "pi-suggester-session-cwd-"),
+	);
+	const projectStateDir = await mkdtemp(
+		path.join(os.tmpdir(), "pi-suggester-session-state-"),
+	);
+	const sessionManager = createPersistentSessionManager(cwd);
+	const storageContext = createSessionStorageContext(
+		projectStateDir,
+		sessionManager,
+	);
+	if (!storageContext.persistent) {
+		throw new Error("expected persistent storage context");
+	}
+	await mkdir(storageContext.interactionDir, { recursive: true });
+	await writeFile(
+		stateFilePath(storageContext.interactionDir, "leaf-1"),
+		"{not json",
+		"utf8",
+	);
+
+	const store = new SessionStateStore(projectStateDir, () => sessionManager);
+	const state = await store.load();
+
+	expect(state.lastSuggestion).toBeUndefined();
+	expect(state.suggestionUsage.calls).toBe(0);
+});
+
+test("SessionStateStore recovers from corrupt usage ledger JSON", async () => {
+	const cwd = await mkdtemp(
+		path.join(os.tmpdir(), "pi-suggester-session-cwd-"),
+	);
+	const projectStateDir = await mkdtemp(
+		path.join(os.tmpdir(), "pi-suggester-session-state-"),
+	);
+	const sessionManager = createPersistentSessionManager(cwd);
+	const storageContext = createSessionStorageContext(
+		projectStateDir,
+		sessionManager,
+	);
+	if (!storageContext.persistent) {
+		throw new Error("expected persistent storage context");
+	}
+	await mkdir(storageContext.storageDir, { recursive: true });
+	await writeFile(
+		storageContext.metaFile,
+		JSON.stringify({ schemaVersion: STORE_SCHEMA_VERSION }),
+		"utf8",
+	);
+	await writeFile(storageContext.usageFile, "{not json", "utf8");
+
+	const store = new SessionStateStore(projectStateDir, () => sessionManager);
+	const state = await store.load();
+
+	expect(state.suggestionUsage.calls).toBe(0);
+	expect(state.seederUsage.calls).toBe(0);
+});
+
+test("SessionStateStore regenerates corrupt migration metadata JSON", async () => {
+	const cwd = await mkdtemp(
+		path.join(os.tmpdir(), "pi-suggester-session-cwd-"),
+	);
+	const projectStateDir = await mkdtemp(
+		path.join(os.tmpdir(), "pi-suggester-session-state-"),
+	);
+	const sessionManager = createPersistentSessionManager(cwd);
+	const storageContext = createSessionStorageContext(
+		projectStateDir,
+		sessionManager,
+	);
+	if (!storageContext.persistent) {
+		throw new Error("expected persistent storage context");
+	}
+	await mkdir(storageContext.storageDir, { recursive: true });
+	await writeFile(storageContext.metaFile, "{not json", "utf8");
+
+	const store = new SessionStateStore(projectStateDir, () => sessionManager);
+	await store.load();
+
+	expect(
+		JSON.parse(await readFile(storageContext.metaFile, "utf8")),
+	).toMatchObject({ schemaVersion: STORE_SCHEMA_VERSION });
 });
 
 test("session state normalization rejects non-finite and negative persisted numbers", async () => {

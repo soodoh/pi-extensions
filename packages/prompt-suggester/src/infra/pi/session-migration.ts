@@ -42,9 +42,10 @@ async function performMigration(params: {
 	const { context, cwd, getSessionManager } = params;
 	if (!context.persistent) return;
 	await ensurePrivateDirectory(context.storageDir);
-	const existingMeta = await readJsonIfExists<PersistedSessionMetadata>(
-		context.metaFile,
-	);
+	const existingMeta =
+		await readRecoverableSessionJson<PersistedSessionMetadata>(
+			context.metaFile,
+		);
 	if (existingMeta?.schemaVersion === STORE_SCHEMA_VERSION) return;
 
 	const sessionManager = getSessionManager();
@@ -62,7 +63,9 @@ async function performMigration(params: {
 		);
 	}
 
-	if (!(await readJsonIfExists<PersistedUsageState>(context.usageFile))) {
+	if (
+		!(await readRecoverableSessionJson<PersistedUsageState>(context.usageFile))
+	) {
 		await atomicWriteJson(context.usageFile, {
 			schemaVersion: STORE_SCHEMA_VERSION,
 			suggestionUsage: usageTotals.suggester,
@@ -85,4 +88,15 @@ async function performMigration(params: {
 			note: "Legacy suggester-state/suggester-usage pi session entries were imported once into extension-owned storage and are ignored afterwards.",
 		},
 	} satisfies PersistedSessionMetadata);
+}
+
+async function readRecoverableSessionJson<T>(
+	filePath: string,
+): Promise<T | undefined> {
+	try {
+		return await readJsonIfExists<T>(filePath);
+	} catch (error) {
+		if (error instanceof SyntaxError) return undefined;
+		throw error;
+	}
 }

@@ -558,6 +558,19 @@ test("PiModelClient ls and find tools ignore local cache directories", async () 
 	expect(findPreview).toContain("(no matches)");
 });
 
+test("PiModelClient grep tool treats leading-option patterns as literals", async () => {
+	const cwd = await tempDir("pi-suggester-grep");
+	await writeFile(join(cwd, "visible.txt"), "literal --files token\n", "utf8");
+
+	const preview = await runSeederToolPreview(cwd, "grep", {
+		path: ".",
+		pattern: "--files",
+		literal: true,
+	});
+
+	expect(preview).toContain("visible.txt:1:literal --files token");
+});
+
 test("PiModelClient seeder tools operate on the checked real path", async () => {
 	const cwd = await tempDir("pi-suggester-realpath");
 	await mkdir(join(cwd, "safe"));

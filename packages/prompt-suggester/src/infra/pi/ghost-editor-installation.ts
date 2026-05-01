@@ -11,6 +11,7 @@ interface GhostEditorDecoratorRuntimeOptions {
 	getSuggestionRevision: () => number;
 	ghostAcceptKeys: readonly GhostAcceptKey[];
 	ghostAcceptAndSendKeys: readonly GhostAcceptKey[];
+	prefillOnlyWhenEditorEmpty: boolean;
 }
 
 export type EditorFactory = (
@@ -76,6 +77,7 @@ class GhostDecoratorRuntime {
 			getSuggestionRevision: () => options?.getSuggestionRevision() ?? 0,
 			ghostAcceptKeys: options?.ghostAcceptKeys ?? ["right"],
 			ghostAcceptAndSendKeys: options?.ghostAcceptAndSendKeys ?? ["enter"],
+			prefillOnlyWhenEditorEmpty: options?.prefillOnlyWhenEditorEmpty ?? false,
 			isActive: () => this.active,
 		};
 	}

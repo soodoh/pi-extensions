@@ -73,6 +73,8 @@ export default function suggester(pi: PromptSuggesterApi) {
 				ghostAcceptKeys: composition.config.suggestion.ghostAcceptKeys,
 				ghostAcceptAndSendKeys:
 					composition.config.suggestion.ghostAcceptAndSendKeys,
+				prefillOnlyWhenEditorEmpty:
+					composition.config.suggestion.prefillOnlyWhenEditorEmpty,
 			},
 		});
 	}

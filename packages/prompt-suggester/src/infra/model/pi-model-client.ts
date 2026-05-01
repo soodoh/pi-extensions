@@ -1110,7 +1110,7 @@ export class PiModelClient implements ModelClient {
 		if (args.literal === true) rgArgs.push("-F");
 		if (typeof args.glob === "string" && args.glob.trim())
 			rgArgs.push("-g", args.glob.trim());
-		rgArgs.push(pattern, searchPath);
+		rgArgs.push("--", pattern, searchPath);
 
 		try {
 			const { stdout } = await execFileAsync("rg", rgArgs, {

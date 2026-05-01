@@ -111,10 +111,14 @@ export class SessionStateStore implements StateStore {
 		context: Extract<SessionStorageContext, { persistent: true }>,
 	): Promise<PersistedInteractionState> {
 		for (const key of context.lookupKeys) {
-			const state = await readJsonIfExists<PersistedInteractionState>(
-				stateFilePath(context.interactionDir, key),
-			);
-			if (state) return normalizeInteractionState(state);
+			try {
+				const state = await readJsonIfExists<PersistedInteractionState>(
+					stateFilePath(context.interactionDir, key),
+				);
+				if (state) return normalizeInteractionState(state);
+			} catch (error) {
+				if (!(error instanceof SyntaxError)) throw error;
+			}
 		}
 		return normalizeInteractionState(INITIAL_RUNTIME_STATE);
 	}

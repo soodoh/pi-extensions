@@ -15,6 +15,7 @@ type OptionsOverrides = Partial<{
 	revision: number;
 	ghostAcceptKeys: GhostSuggestionDecoratorOptions["ghostAcceptKeys"];
 	ghostAcceptAndSendKeys: GhostSuggestionDecoratorOptions["ghostAcceptAndSendKeys"];
+	prefillOnlyWhenEditorEmpty: boolean;
 }>;
 
 type FakeEditor = GhostDecoratableEditor & {
@@ -34,6 +35,7 @@ function createOptions(overrides: OptionsOverrides = {}) {
 			getSuggestionRevision: () => revision,
 			ghostAcceptKeys: overrides.ghostAcceptKeys ?? ["right"],
 			ghostAcceptAndSendKeys: overrides.ghostAcceptAndSendKeys ?? ["enter"],
+			prefillOnlyWhenEditorEmpty: overrides.prefillOnlyWhenEditorEmpty ?? false,
 			isActive: () => active,
 		},
 		setActive(next: boolean) {
@@ -122,6 +124,20 @@ test("ghost decorator can be deactivated without replacing the editor", () => {
 
 	expect(editor.inputs).toEqual(["\x1b[C"]);
 	expect(editor.getText()).not.toBe("hello world");
+});
+
+test("ghost decorator hides non-empty prefix suggestions when configured for empty-editor prefill", () => {
+	const state = createOptions({ prefillOnlyWhenEditorEmpty: true });
+	const editor = createFakeEditor();
+	const decorated = decorateGhostSuggestionEditor(editor, () => state.options);
+
+	decorated.setText("hello");
+
+	expect(decorated.render(40)).toEqual([
+		"top",
+		" hello\x1b[7m \x1b[27m",
+		"bottom",
+	]);
 });
 
 test("ghost decorator installation wraps future editor factories instead of reinstalling on every sync", () => {

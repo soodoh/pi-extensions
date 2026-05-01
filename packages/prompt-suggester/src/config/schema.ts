@@ -99,7 +99,6 @@ type ValidatorMap<T> = {
 interface SectionNormalizationResult<T> {
 	value: Partial<T>;
 	changed: boolean;
-	hasAny: boolean;
 }
 
 const seedValidators: ValidatorMap<SeedConfig> = {
@@ -203,7 +202,6 @@ function normalizeSection<T extends object>(
 	input: unknown,
 	defaults: T,
 	validators: ValidatorMap<T>,
-	includeDefaults: boolean,
 ): SectionNormalizationResult<T> {
 	const source = isObject(input) ? input : undefined;
 	let changed = input !== undefined && !isObject(input);
@@ -220,34 +218,27 @@ function normalizeSection<T extends object>(
 	}
 
 	const result: Partial<T> = {};
-	let hasAny = false;
 	const mutableResult = result as Record<string, unknown>;
 	const defaultEntries = defaults as Record<string, unknown>;
 	for (const key of Object.keys(defaultEntries) as Array<keyof T & string>) {
 		const raw = source?.[key];
 		if (raw === undefined) {
-			if (includeDefaults) {
-				mutableResult[key] = defaultEntries[key];
-			}
+			mutableResult[key] = defaultEntries[key];
 			continue;
 		}
 
 		const validator = validators[key];
 		if (validator(raw)) {
 			mutableResult[key] = raw;
-			hasAny = true;
 		} else {
 			changed = true;
-			if (includeDefaults) {
-				mutableResult[key] = defaultEntries[key];
-			}
+			mutableResult[key] = defaultEntries[key];
 		}
 	}
 
 	return {
 		value: result,
 		changed,
-		hasAny,
 	};
 }
 
@@ -295,41 +286,31 @@ export function normalizeConfig(
 			hasUnknownTopLevelKeys(source, defaults);
 	}
 
-	const seed = normalizeSection(
-		source?.seed,
-		defaults.seed,
-		seedValidators,
-		true,
-	);
+	const seed = normalizeSection(source?.seed, defaults.seed, seedValidators);
 	const reseed = normalizeSection(
 		source?.reseed,
 		defaults.reseed,
 		reseedValidators,
-		true,
 	);
 	const suggestion = normalizeSection(
 		source?.suggestion,
 		defaults.suggestion,
 		suggestionValidators,
-		true,
 	);
 	const steering = normalizeSection(
 		source?.steering,
 		defaults.steering,
 		steeringValidators,
-		true,
 	);
 	const logging = normalizeSection(
 		source?.logging,
 		defaults.logging,
 		loggingValidators,
-		true,
 	);
 	const inference = normalizeSection(
 		source?.inference,
 		defaults.inference,
 		inferenceValidators,
-		true,
 	);
 
 	changed =

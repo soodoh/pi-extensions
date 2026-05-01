@@ -73,4 +73,10 @@ describe("shared prompt history store", () => {
 			"also valid",
 		]);
 	});
+
+	test("propagates filesystem errors other than a missing history file", async () => {
+		const dir = await makeTempDir();
+
+		await expect(readPromptHistory(dir)).rejects.toThrow();
+	});
 });

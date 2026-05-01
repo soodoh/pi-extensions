@@ -76,4 +76,14 @@ test("normalizeUsageStats falls back to zeros for missing data", () => {
 		costTotal: 0,
 		last: undefined,
 	});
+	expect(normalizeUsageStats({ outputTokens: 5 })).toEqual({
+		calls: 0,
+		inputTokens: 0,
+		outputTokens: 5,
+		cacheReadTokens: 0,
+		cacheWriteTokens: 0,
+		totalTokens: 0,
+		costTotal: 0,
+		last: undefined,
+	});
 });

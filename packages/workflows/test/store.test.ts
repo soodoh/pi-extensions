@@ -1,4 +1,4 @@
-import { mkdir, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, test, vi } from "vitest";
@@ -10,9 +10,11 @@ async function importStoreWithHome(home: string) {
 	return import("../src/store");
 }
 
+const tempDirs: string[] = [];
+
 async function tempHome(name: string): Promise<string> {
-	const dir = join(tmpdir(), `${name}-${process.pid}-${Date.now()}`);
-	await mkdir(dir, { recursive: true });
+	const dir = await mkdtemp(join(tmpdir(), `${name}-`));
+	tempDirs.push(dir);
 	return dir;
 }
 
@@ -28,9 +30,12 @@ function runRecord(id: string, updatedAt: string): WorkflowRunRecord {
 	};
 }
 
-afterEach(() => {
+afterEach(async () => {
 	vi.doUnmock("node:os");
 	vi.resetModules();
+	await Promise.all(
+		tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })),
+	);
 });
 
 describe("workflow run store", () => {

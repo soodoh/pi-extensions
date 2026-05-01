@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { readFile } from "node:fs/promises";
+import { readFile, realpath } from "node:fs/promises";
 import { basename, join, relative, resolve } from "node:path";
 import { loadWorkflowConfig } from "./config-loader";
 import { applyModelPolicy } from "./model-policy";
@@ -22,6 +22,13 @@ import type {
 } from "./workflow-types";
 
 type MaybePromise<T> = T | Promise<T>;
+
+async function relativeToRealCwd(
+	cwd: string,
+	fullPath: string,
+): Promise<string> {
+	return relative(await realpath(cwd), fullPath);
+}
 
 type WorkflowSessionManager = {
 	getSessionFile?: () => string | undefined;
@@ -179,7 +186,7 @@ export class WorkflowRunner {
 				`Plan must be an existing markdown file inside workflow cwd: ${args}`,
 			);
 		const content = await readFile(full, "utf8");
-		run.planPath = relative(run.cwd, full);
+		run.planPath = await relativeToRealCwd(run.cwd, full);
 		run.planContentHash = sha256(content);
 		run.approvedPlanContent = content;
 		run.phase = "approved";
@@ -296,7 +303,7 @@ export class WorkflowRunner {
 			run,
 			full,
 			planContent,
-			planPath: relative(run.cwd, full),
+			planPath: await relativeToRealCwd(run.cwd, full),
 			planContentHash: sha256(planContent),
 		};
 	}

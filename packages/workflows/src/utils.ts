@@ -59,7 +59,7 @@ export async function ensureRealPathInsideCwd(
 	const relativePath = relative(realRoot, realFull);
 	if (relativePath.startsWith("..") || isAbsolute(relativePath))
 		throw new Error(`Path must be inside cwd: ${path}`);
-	return full;
+	return realFull;
 }
 export async function readTextIfExists(
 	path: string,

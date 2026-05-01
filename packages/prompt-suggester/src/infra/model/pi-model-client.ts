@@ -1036,11 +1036,16 @@ export class PiModelClient implements ModelClient {
 		) {
 			throw new Error(`Path escapes repository root: ${value}`);
 		}
-		return absolute;
+		return realAbsolute;
+	}
+
+	private async realCwd(): Promise<string> {
+		return await fs.realpath(this.cwd);
 	}
 
 	private async toolLs(args: Record<string, unknown>): Promise<string> {
 		const absolute = await this.resolvePath(args.path);
+		const realRoot = await this.realCwd();
 		const limit = Math.min(500, Math.max(1, Number(args.limit ?? 200)));
 		const entries = await fs.readdir(absolute, { withFileTypes: true });
 		const lines = entries
@@ -1051,13 +1056,14 @@ export class PiModelClient implements ModelClient {
 			.slice(0, limit)
 			.map(
 				(entry) =>
-					`${entry.isDirectory() ? "d" : "f"} ${path.relative(this.cwd, path.join(absolute, entry.name)) || "."}`,
+					`${entry.isDirectory() ? "d" : "f"} ${path.relative(realRoot, path.join(absolute, entry.name)) || "."}`,
 			);
 		return truncate(lines.join("\n") || "(empty)", 8000);
 	}
 
 	private async toolFind(args: Record<string, unknown>): Promise<string> {
 		const absolute = await this.resolvePath(args.path);
+		const realRoot = await this.realCwd();
 		const pattern = String(args.pattern ?? "").trim();
 		if (!pattern) throw new Error("find requires pattern");
 		const limit = Math.min(500, Math.max(1, Number(args.limit ?? 200)));
@@ -1078,7 +1084,7 @@ export class PiModelClient implements ModelClient {
 					await walk(path.join(dir, entry.name));
 					continue;
 				}
-				const rel = path.relative(this.cwd, path.join(dir, entry.name));
+				const rel = path.relative(realRoot, path.join(dir, entry.name));
 				if (matcher.test(rel.replaceAll("\\", "/"))) results.push(rel);
 			}
 		};
@@ -1125,7 +1131,7 @@ export class PiModelClient implements ModelClient {
 			const stderr = typeof rawStderr === "string" ? rawStderr.trim() : "";
 			const fallback = [stdout, stderr].filter(Boolean).join("\n");
 			this.logger?.warn("seeder.tool.grep.failed", {
-				path: path.relative(this.cwd, searchPath) || ".",
+				path: path.relative(await this.realCwd(), searchPath) || ".",
 				timedOut,
 				error: timedOut
 					? "grep timed out"

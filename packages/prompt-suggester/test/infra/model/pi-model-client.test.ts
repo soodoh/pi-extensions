@@ -1,9 +1,9 @@
-import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { Model, SimpleStreamOptions } from "@mariozechner/pi-ai";
-import { expect, test } from "vitest";
+import { afterEach, expect, test } from "vitest";
 import type { Logger } from "../../../src/app/ports/logger";
 import type { SuggestionPromptContext } from "../../../src/app/services/prompt-context-builder";
 import {
@@ -24,6 +24,19 @@ const { registerApiProvider, unregisterApiProviders } = await import(
 const CLAUDE_BRIDGE_STREAM_SIMPLE_KEY = Symbol.for(
 	"claude-bridge:activeStreamSimple",
 );
+const tempDirs: string[] = [];
+
+async function tempDir(name: string): Promise<string> {
+	const dir = await mkdtemp(join(tmpdir(), `${name}-`));
+	tempDirs.push(dir);
+	return dir;
+}
+
+afterEach(async () => {
+	await Promise.all(
+		tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })),
+	);
+});
 
 type TestModel = Model<string>;
 type AuthResult =
@@ -171,7 +184,7 @@ test("globToRegExp treats **/ as matching root-level files", () => {
 });
 
 test("PiModelClient find tool matches root files for plain patterns", async (t) => {
-	const cwd = await mkdtemp(join(tmpdir(), "pi-suggester-find-"));
+	const cwd = await tempDir("pi-suggester-find");
 	await writeFile(join(cwd, "package.json"), "{}\n", "utf8");
 	let callCount = 0;
 	const api = `test-api-${Math.random().toString(36).slice(2)}`;
@@ -523,7 +536,7 @@ async function runSeederToolPreview(
 }
 
 test("PiModelClient ls and find tools ignore local cache directories", async () => {
-	const cwd = await mkdtemp(join(tmpdir(), "pi-suggester-ignore-"));
+	const cwd = await tempDir("pi-suggester-ignore");
 	await mkdir(join(cwd, ".turbo"));
 	await mkdir(join(cwd, ".pi-lens"));
 	await mkdir(join(cwd, ".ralph"));
@@ -545,8 +558,22 @@ test("PiModelClient ls and find tools ignore local cache directories", async () 
 	expect(findPreview).toContain("(no matches)");
 });
 
+test("PiModelClient seeder tools operate on the checked real path", async () => {
+	const cwd = await tempDir("pi-suggester-realpath");
+	await mkdir(join(cwd, "safe"));
+	await writeFile(join(cwd, "safe", "visible.txt"), "visible\n", "utf8");
+	await symlink(join(cwd, "safe"), join(cwd, "linked-safe"));
+
+	const preview = await runSeederToolPreview(cwd, "ls", {
+		path: "linked-safe",
+	});
+
+	expect(preview).toContain("safe/visible.txt");
+	expect(preview).not.toContain("linked-safe/visible.txt");
+});
+
 test("PiModelClient read tool returns a bounded slice for large files", async () => {
-	const cwd = await mkdtemp(join(tmpdir(), "pi-suggester-read-"));
+	const cwd = await tempDir("pi-suggester-read");
 	const largePath = join(cwd, "large.txt");
 	const lines = Array.from({ length: 5000 }, (_, index) => `line-${index + 1}`);
 	await writeFile(largePath, lines.join("\n"), "utf8");

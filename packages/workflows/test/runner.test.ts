@@ -1,4 +1,4 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -12,9 +12,11 @@ async function importRunnerWithHome(home: string) {
 	return import("../src/runner");
 }
 
+const tempDirs: string[] = [];
+
 async function tempDir(name: string): Promise<string> {
-	const dir = join(tmpdir(), `${name}-${process.pid}-${Date.now()}`);
-	await mkdir(dir, { recursive: true });
+	const dir = await mkdtemp(join(tmpdir(), `${name}-`));
+	tempDirs.push(dir);
 	return dir;
 }
 
@@ -47,9 +49,12 @@ function runRecord(
 	};
 }
 
-afterEach(() => {
+afterEach(async () => {
 	vi.doUnmock("node:os");
 	vi.resetModules();
+	await Promise.all(
+		tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })),
+	);
 });
 
 describe("workflow runner kickoff", () => {

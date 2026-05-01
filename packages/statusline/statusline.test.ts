@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { mkdtemp, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -7,6 +7,13 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import statusline from "./index";
 
 const execFileAsync = promisify(execFile);
+const tempDirs: string[] = [];
+
+async function tempDir(name: string): Promise<string> {
+	const dir = await mkdtemp(join(tmpdir(), `${name}-`));
+	tempDirs.push(dir);
+	return dir;
+}
 
 type Handler = (event: Record<string, unknown>, ctx: StatuslineContext) => void;
 type Widget = {
@@ -39,7 +46,9 @@ type StatuslineContext = {
 		contextWindow?: number;
 	};
 	modelRegistry?: {
-		getAvailable(): Array<{ provider?: string }>;
+		getAvailable():
+			| Array<{ provider?: string }>
+			| Promise<Array<{ provider?: string }>>;
 		getApiKeyForProvider(provider: string): Promise<string | undefined>;
 		isUsingOAuth?(model: { provider?: string }): boolean;
 		authStorage?: {
@@ -63,9 +72,12 @@ function createPi() {
 	};
 }
 
-afterEach(() => {
+afterEach(async () => {
 	vi.unstubAllEnvs();
 	vi.unstubAllGlobals();
+	await Promise.all(
+		tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })),
+	);
 });
 
 describe("statusline extension", () => {
@@ -122,6 +134,39 @@ describe("statusline extension", () => {
 
 		expect(line).toContain("Sonnet Test");
 		expect(line).toContain("25.0%/1.0k");
+	});
+
+	test("handles async modelRegistry.getAvailable without iterating promises", () => {
+		vi.stubEnv("PI_STATUSLINE_PROVIDER_USAGE", "1");
+		let widgetFactory: WidgetFactory | undefined;
+		const pi = createPi();
+		statusline(pi);
+		const ctx: StatuslineContext = {
+			hasUI: true,
+			ui: {
+				setFooter() {},
+				setWidget(_key, factory) {
+					widgetFactory = factory;
+				},
+			},
+			model: { id: "custom", provider: "custom-provider" },
+			modelRegistry: {
+				async getAvailable() {
+					return [{ provider: "openrouter" }];
+				},
+				async getApiKeyForProvider() {
+					return undefined;
+				},
+			},
+			sessionManager: { getBranch: () => [] },
+			settingsManager: { getCompactionSettings: () => ({ enabled: true }) },
+			getContextUsage: () => ({ tokens: 0, contextWindow: 1000, percent: 0 }),
+		};
+
+		expect(() => pi.handlers.get("session_start")?.({}, ctx)).not.toThrow();
+		expect(() =>
+			widgetFactory?.({}, { fg: (_color, text) => text }).render(120),
+		).not.toThrow();
 	});
 
 	test("skips provider usage network egress by default", async () => {
@@ -231,8 +276,8 @@ describe("statusline extension", () => {
 	});
 
 	test("scopes git status cache by active session cwd", async () => {
-		const repoOne = await mkdtemp(join(tmpdir(), "pi-statusline-repo-one-"));
-		const repoTwo = await mkdtemp(join(tmpdir(), "pi-statusline-repo-two-"));
+		const repoOne = await tempDir("pi-statusline-repo-one");
+		const repoTwo = await tempDir("pi-statusline-repo-two");
 		for (const repo of [repoOne, repoTwo]) {
 			await execFileAsync("git", ["init"], { cwd: repo });
 			await execFileAsync("git", ["config", "user.email", "test@example.com"], {

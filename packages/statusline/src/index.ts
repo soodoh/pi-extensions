@@ -38,9 +38,11 @@ type AuthStorageLike = {
 	getOAuthProviders?(): { id: string; name?: string }[];
 };
 
+type MaybePromise<T> = T | Promise<T>;
+
 type ModelRegistryLike = {
 	getAll?(): ModelLike[];
-	getAvailable?(): ModelLike[];
+	getAvailable?(): MaybePromise<ModelLike[]>;
 	hasConfiguredAuth?(model: ModelLike): boolean;
 	getProviderAuthStatus?(provider: string): {
 		configured: boolean;
@@ -433,7 +435,7 @@ function modelAuthKind(
 
 function getConfiguredModels(ctx: ExtensionContext): ModelLike[] {
 	const available = ctx.modelRegistry?.getAvailable?.();
-	if (available) return available;
+	if (Array.isArray(available)) return available;
 
 	const allModels = ctx.modelRegistry?.getAll?.() ?? [];
 	const hasConfiguredAuth = ctx.modelRegistry?.hasConfiguredAuth;

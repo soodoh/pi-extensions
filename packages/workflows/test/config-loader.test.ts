@@ -1,4 +1,4 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -14,15 +14,20 @@ const packageRoot = dirname(
 	fileURLToPath(new URL("../package.json", import.meta.url)),
 );
 
+const tempDirs: string[] = [];
+
 async function tempDir(name: string): Promise<string> {
-	const dir = join(tmpdir(), `${name}-${process.pid}-${Date.now()}`);
-	await mkdir(dir, { recursive: true });
+	const dir = await mkdtemp(join(tmpdir(), `${name}-`));
+	tempDirs.push(dir);
 	return dir;
 }
 
-afterEach(() => {
+afterEach(async () => {
 	vi.doUnmock("node:os");
 	vi.resetModules();
+	await Promise.all(
+		tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })),
+	);
 });
 
 describe("workflow config loader", () => {

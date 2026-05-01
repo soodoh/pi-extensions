@@ -1,7 +1,9 @@
-import type { ThinkingLevel } from "./types";
+import type { InferenceConfig, ThinkingLevel } from "./types";
+
+type ConfiguredThinkingLevel = InferenceConfig["seederThinking"];
 
 export function toInvocationThinkingLevel(
-	value: string,
+	value: ConfiguredThinkingLevel,
 ): ThinkingLevel | undefined {
-	return value === "session-default" ? undefined : (value as ThinkingLevel);
+	return value === "session-default" ? undefined : value;
 }

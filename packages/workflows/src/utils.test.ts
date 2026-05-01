@@ -1,8 +1,16 @@
-import { mkdir, readFile, symlink, writeFile } from "node:fs/promises";
+import {
+	mkdir,
+	mkdtemp,
+	readFile,
+	realpath,
+	rm,
+	symlink,
+	writeFile,
+} from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test } from "vitest";
 import {
 	ensureInsideCwd,
 	ensureRealPathInsideCwd,
@@ -16,6 +24,20 @@ import {
 	sha256,
 	writeJson,
 } from "./utils";
+
+const tempDirs: string[] = [];
+
+async function tempDir(name: string): Promise<string> {
+	const dir = await mkdtemp(join(tmpdir(), `${name}-`));
+	tempDirs.push(dir);
+	return dir;
+}
+
+afterEach(async () => {
+	await Promise.all(
+		tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })),
+	);
+});
 
 describe("workflow utils", () => {
 	test("formats ids, timestamps, hashes, and home paths", () => {
@@ -51,16 +73,8 @@ describe("workflow utils", () => {
 	});
 
 	test("ensureRealPathInsideCwd rejects symlinks that escape cwd", async () => {
-		const root = join(
-			tmpdir(),
-			`pi-workflows-root-${process.pid}-${Date.now()}`,
-		);
-		const outside = join(
-			tmpdir(),
-			`pi-workflows-outside-${process.pid}-${Date.now()}`,
-		);
-		await mkdir(root, { recursive: true });
-		await mkdir(outside, { recursive: true });
+		const root = await tempDir("pi-workflows-root");
+		const outside = await tempDir("pi-workflows-outside");
 		await writeFile(join(outside, "plan.md"), "# Plan\n", "utf8");
 		await symlink(join(outside, "plan.md"), join(root, "linked-plan.md"));
 
@@ -69,24 +83,20 @@ describe("workflow utils", () => {
 		).rejects.toThrow(/inside cwd/);
 	});
 
-	test("ensureRealPathInsideCwd allows real files inside cwd", async () => {
-		const root = join(
-			tmpdir(),
-			`pi-workflows-root-${process.pid}-${Date.now()}-ok`,
-		);
-		await mkdir(root, { recursive: true });
-		await writeFile(join(root, "plan.md"), "# Plan\n", "utf8");
+	test("ensureRealPathInsideCwd returns the checked real path inside cwd", async () => {
+		const root = await tempDir("pi-workflows-root");
+		await mkdir(join(root, "plans"), { recursive: true });
+		const realPlan = join(root, "plans", "plan.md");
+		await writeFile(realPlan, "# Plan\n", "utf8");
+		await symlink(realPlan, join(root, "linked-plan.md"));
 
-		await expect(ensureRealPathInsideCwd(root, "plan.md")).resolves.toBe(
-			join(root, "plan.md"),
+		await expect(ensureRealPathInsideCwd(root, "linked-plan.md")).resolves.toBe(
+			await realpath(realPlan),
 		);
 	});
 
 	test("readTextIfExists and writeJson handle optional files", async () => {
-		const root = join(
-			tmpdir(),
-			`pi-workflows-json-${process.pid}-${Date.now()}`,
-		);
+		const root = await tempDir("pi-workflows-json");
 		const file = join(root, "nested", "data.json");
 		await expect(readTextIfExists(file)).resolves.toBeUndefined();
 

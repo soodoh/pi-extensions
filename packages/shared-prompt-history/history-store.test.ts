@@ -58,6 +58,25 @@ describe("shared prompt history store", () => {
 		]);
 	});
 
+	test("suppresses duplicates from the last existing record without loading full history", async () => {
+		const dir = await makeTempDir();
+		const historyPath = join(dir, "prompt-history.jsonl");
+		await writeFile(
+			historyPath,
+			`${JSON.stringify({ prompt: "first" })}\nnot-json\n${JSON.stringify({ prompt: "same" })}\n`,
+			"utf8",
+		);
+
+		await expect(appendPrompt("same", historyPath)).resolves.toBe(false);
+		await expect(appendPrompt("different", historyPath)).resolves.toBe(true);
+
+		await expect(readPromptHistory(historyPath)).resolves.toEqual([
+			"first",
+			"same",
+			"different",
+		]);
+	});
+
 	test("ignores malformed JSONL records while reading", async () => {
 		const dir = await makeTempDir();
 		const historyPath = join(dir, "prompt-history.jsonl");

@@ -1,11 +1,12 @@
-import { createHash, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { mkdir, readFile, realpath, rename, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const WORKFLOW_RUN_ID_PATTERN = /^pwf-[a-f0-9]{8}$/;
+const WORKFLOW_RUN_ID_PATTERN =
+	/^pwf-(?:[a-f0-9]{8}|[a-f0-9]{24}|[a-f0-9]{32})$/;
 
 export function isValidWorkflowRunId(id: string): boolean {
 	return WORKFLOW_RUN_ID_PATTERN.test(id);
@@ -20,7 +21,7 @@ export function normalizeWorkflowRunId(id: string): string {
 }
 
 export function makeRunId(): string {
-	return `pwf-${randomUUID().slice(0, 8)}`;
+	return `pwf-${randomBytes(16).toString("hex")}`;
 }
 export function nowIso(): string {
 	return new Date().toISOString();

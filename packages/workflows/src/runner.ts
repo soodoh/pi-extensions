@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
-import { basename, join, relative } from "node:path";
+import { basename, join, relative, resolve } from "node:path";
 import { loadWorkflowConfig } from "./config-loader";
 import { applyModelPolicy } from "./model-policy";
 import { reviewPlanWithPlannotator } from "./plannotator";
@@ -191,12 +191,13 @@ export class WorkflowRunner {
 	async submitPlan(
 		runId: string,
 		filePath: string,
-		_ctx: WorkflowContext,
+		ctx: WorkflowContext,
 	): Promise<{ approved: boolean; text: string }> {
 		const artifact = await this.readPlanArtifact(runId, filePath, [
 			"planning",
 			"reviewing-plan",
 		]);
+		assertWorkflowSession(artifact.run, ctx, "planning");
 		let { run } = artifact;
 		const { full, planContent } = artifact;
 		run.planPath = artifact.planPath;
@@ -243,12 +244,13 @@ export class WorkflowRunner {
 		runId: string,
 		filePath: string,
 		approvalNotes: string | undefined,
-		_ctx: WorkflowContext,
+		ctx: WorkflowContext,
 	): Promise<{ approved: boolean; text: string }> {
 		const artifact = await this.readPlanArtifact(runId, filePath, [
 			"planning",
 			"reviewing-plan",
 		]);
+		assertWorkflowSession(artifact.run, ctx, "planning");
 		const { run, planContent } = artifact;
 		run.planPath = artifact.planPath;
 		run.planContentHash = artifact.planContentHash;
@@ -353,9 +355,11 @@ export class WorkflowRunner {
 		runId: string,
 		status: "completed" | "failed",
 		summary: string | undefined,
+		ctx: WorkflowContext,
 	): Promise<{ text: string }> {
 		const run = await getRun(runId);
 		if (!run) throw new Error(`Unknown workflow run: ${runId}`);
+		assertWorkflowSession(run, ctx, "execution");
 		if (run.phase !== "executing" && run.phase !== status)
 			throw new Error(
 				`Workflow run ${runId} is ${run.phase}; only executing runs can be completed or failed.`,
@@ -522,6 +526,31 @@ function isNonExecutionLoaderNode(node: WorkflowNode): boolean {
 		node.id === "load-plan" ||
 		Boolean(node.output_artifact && node.context === "newSession")
 	);
+}
+
+function assertWorkflowSession(
+	run: WorkflowRunRecord,
+	ctx: WorkflowContext,
+	kind: "planning" | "execution",
+): void {
+	const expected =
+		kind === "planning" ? run.planningSessionPath : run.executionSessionPath;
+	if (!expected?.trim()) {
+		throw new Error(
+			`Workflow run ${run.id} has no recorded ${kind} session path; refusing to mutate it from this tool call.`,
+		);
+	}
+	const current = ctx.sessionManager?.getSessionFile?.()?.trim();
+	if (!current) {
+		throw new Error(
+			`Workflow run ${run.id} ${kind} tools must be called from its recorded ${kind} session. Current session is unavailable; expected ${expected}.`,
+		);
+	}
+	if (resolve(current) !== resolve(expected)) {
+		throw new Error(
+			`Workflow run ${run.id} ${kind} tools must be called from its recorded ${kind} session. Current session is ${current}; expected ${expected}.`,
+		);
+	}
 }
 
 function matchesWhen(

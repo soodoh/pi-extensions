@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import type { WorkflowContext } from "../src/runner";
+import type { WorkflowRunRecord } from "../src/workflow-types";
 
 async function importRunnerWithHome(home: string) {
 	vi.resetModules();
@@ -17,12 +18,115 @@ async function tempDir(name: string): Promise<string> {
 	return dir;
 }
 
+function workflowCtx(cwd: string, sessionFile?: string): WorkflowContext {
+	return {
+		cwd,
+		sessionManager: sessionFile
+			? {
+					getSessionFile: () => sessionFile,
+				}
+			: undefined,
+		async sendUserMessage() {},
+		async newSession() {},
+	};
+}
+
+function runRecord(
+	id: string,
+	cwd: string,
+	phase: WorkflowRunRecord["phase"],
+): WorkflowRunRecord {
+	return {
+		id,
+		workflowName: "plan-execute",
+		phase,
+		cwd,
+		createdAt: "2026-05-01T00:00:00.000Z",
+		updatedAt: "2026-05-01T00:00:00.000Z",
+		logs: [],
+	};
+}
+
 afterEach(() => {
 	vi.doUnmock("node:os");
 	vi.resetModules();
 });
 
 describe("workflow runner kickoff", () => {
+	test("plan tools refuse to mutate runs from the wrong session", async () => {
+		const home = await tempDir("pi-workflows-runner-session-home");
+		const cwd = await tempDir("pi-workflows-runner-session-cwd");
+		await writeFile(join(cwd, "plan.md"), "# Plan\n", "utf8");
+		const { WorkflowRunner } = await importRunnerWithHome(home);
+		const { getRun, saveRun } = await import("../src/store");
+		const run = {
+			...runRecord("pwf-11111111", cwd, "planning"),
+			planningSessionPath: join(cwd, "planning-session.json"),
+		};
+		await saveRun(run);
+		const runner = new WorkflowRunner(
+			{
+				events: {
+					emit: () => {},
+					on: () => undefined,
+				},
+			},
+			pathToFileURL(new URL("../index.ts", import.meta.url).pathname).href,
+		);
+		const wrongCtx = workflowCtx(cwd, join(cwd, "other-session.json"));
+
+		await expect(
+			runner.approvePlan("pwf-11111111", "plan.md", undefined, wrongCtx),
+		).rejects.toThrow(/planning tools must be called/);
+		await expect(
+			runner.submitPlan("pwf-11111111", "plan.md", wrongCtx),
+		).rejects.toThrow(/planning tools must be called/);
+		expect((await getRun("pwf-11111111"))?.phase).toBe("planning");
+	});
+
+	test("completion tools require the recorded execution session", async () => {
+		const home = await tempDir("pi-workflows-runner-complete-home");
+		const cwd = await tempDir("pi-workflows-runner-complete-cwd");
+		const { WorkflowRunner } = await importRunnerWithHome(home);
+		const { getRun, saveRun } = await import("../src/store");
+		const run = {
+			...runRecord("pwf-22222222", cwd, "executing"),
+			executionSessionPath: join(cwd, "execution-session.json"),
+		};
+		await saveRun(run);
+		const runner = new WorkflowRunner(
+			{
+				events: {
+					emit: () => {},
+					on: () => undefined,
+				},
+			},
+			pathToFileURL(new URL("../index.ts", import.meta.url).pathname).href,
+		);
+
+		await expect(
+			runner.completeRun("pwf-22222222", "completed", "done", workflowCtx(cwd)),
+		).rejects.toThrow(/Current session is unavailable/);
+		await expect(
+			runner.completeRun(
+				"pwf-22222222",
+				"completed",
+				"done",
+				workflowCtx(cwd, join(cwd, "other-session.json")),
+			),
+		).rejects.toThrow(/execution tools must be called/);
+
+		await expect(
+			runner.completeRun(
+				"pwf-22222222",
+				"completed",
+				"done",
+				workflowCtx(cwd, join(cwd, "execution-session.json")),
+			),
+		).resolves.toEqual({ text: "Workflow pwf-22222222 marked completed." });
+		expect((await getRun("pwf-22222222"))?.phase).toBe("completed");
+	});
+
 	test("execute-plan handoff excludes the existing-plan loader node", async () => {
 		const home = await tempDir("pi-workflows-runner-home");
 		const cwd = await tempDir("pi-workflows-runner-cwd");

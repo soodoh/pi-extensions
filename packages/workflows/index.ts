@@ -61,7 +61,8 @@ type PiApi = {
 const runIdSchema = Type.Refine(
 	Type.String({
 		minLength: 1,
-		description: "Pi workflow run id, e.g. pwf-1234abcd",
+		description:
+			"Pi workflow run id, e.g. pwf-1234abcd or pwf-0123456789abcdef0123456789abcdef",
 	}),
 	isValidWorkflowRunId,
 );
@@ -263,6 +264,7 @@ export default function piWorkflows(pi: PiApi) {
 				input.runId,
 				input.status,
 				input.summary,
+				ctx,
 			);
 			lastStatus = `${input.runId} ${input.status}`;
 			ctx.ui.setStatus?.("workflow", lastStatus);

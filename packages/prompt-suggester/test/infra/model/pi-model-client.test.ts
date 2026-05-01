@@ -1,3 +1,5 @@
+import { mkdtemp, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { Model, SimpleStreamOptions } from "@mariozechner/pi-ai";
@@ -159,6 +161,99 @@ test("globToRegExp supports single-character ? wildcards", () => {
 	expect(matcher.test("src/fileA.ts")).toBe(true);
 	expect(matcher.test("src/file10.ts")).toBe(false);
 	expect(matcher.test("src/file/.ts")).toBe(false);
+});
+
+test("globToRegExp treats **/ as matching root-level files", () => {
+	const matcher = globToRegExp("**/*.ts");
+	expect(matcher.test("index.ts")).toBe(true);
+	expect(matcher.test("src/index.ts")).toBe(true);
+	expect(matcher.test("src/nested/index.ts")).toBe(true);
+});
+
+test("PiModelClient find tool matches root files for plain patterns", async (t) => {
+	const cwd = await mkdtemp(join(tmpdir(), "pi-suggester-find-"));
+	await writeFile(join(cwd, "package.json"), "{}\n", "utf8");
+	let callCount = 0;
+	const api = `test-api-${Math.random().toString(36).slice(2)}`;
+	const sourceId = `test-provider-${Math.random().toString(36).slice(2)}`;
+	registerApiProvider(
+		{
+			api,
+			stream() {
+				throw new Error("stream should not be used in these tests");
+			},
+			streamSimple() {
+				callCount += 1;
+				return {
+					async result() {
+						return successResponse(
+							callCount === 1
+								? JSON.stringify({
+										type: "tool",
+										tool: "find",
+										arguments: { pattern: "package.json" },
+									})
+								: JSON.stringify({
+										type: "final",
+										seed: {
+											projectIntentSummary: "Test project",
+											objectivesSummary: "Exercise find tool",
+											constraintsSummary: "Keep tests small",
+											principlesGuidelinesSummary: "Use fixtures",
+											implementationStatusSummary: "Ready",
+											topObjectives: ["Exercise find tool"],
+											constraints: ["Keep tests small"],
+											keyFiles: [
+												{
+													path: "package.json",
+													category: "vision",
+													whyImportant: "Root package metadata",
+												},
+											],
+											categoryFindings: {
+												vision: {
+													found: true,
+													rationale: "Root metadata found",
+												},
+												architecture: {
+													found: false,
+													rationale: "Not needed for this fixture",
+												},
+												principles_guidelines: {
+													found: false,
+													rationale: "Not needed for this fixture",
+												},
+											},
+										},
+									}),
+						);
+					},
+				};
+			},
+		},
+		sourceId,
+	);
+	t.onTestFinished(() => unregisterApiProviders(sourceId));
+	const toolResults: string[] = [];
+	const logger: Logger = {
+		debug() {},
+		info(_message, meta) {
+			if (typeof meta?.toolResultPreview === "string") {
+				toolResults.push(meta.toolResultPreview);
+			}
+		},
+		warn() {},
+		error() {},
+	};
+	const model = createModel(api);
+	const client = new PiModelClient(createRuntimeWithModel(model), logger, cwd);
+
+	await client.generateSeed({
+		reseedTrigger: { reason: "manual", changedFiles: [] },
+		previousSeed: null,
+	});
+
+	expect(toolResults).toContain("package.json");
 });
 
 test("PiModelClient resolves auth via getApiKeyAndHeaders when available", async (t) => {

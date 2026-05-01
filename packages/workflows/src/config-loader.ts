@@ -25,121 +25,158 @@ const thinkingLevelSchema = Type.Union([
 	Type.Literal("high"),
 	Type.Literal("xhigh"),
 ]);
-const modelPolicySchema = Type.Object({
-	model: Type.Optional(Type.String()),
-	models: Type.Optional(Type.Array(Type.String())),
-	autoSelectModel: Type.Optional(Type.Boolean()),
-	thinking: Type.Optional(thinkingLevelSchema),
-});
-const workflowLoopSchema = Type.Object({
-	prompt: Type.Optional(Type.String()),
-	command: Type.Optional(Type.String()),
-	until: Type.String(),
-	max_iterations: Type.Integer({ minimum: 1 }),
-	fresh_context: Type.Optional(Type.Boolean()),
-	until_bash: Type.Optional(Type.String()),
-});
-const workflowApprovalSchema = Type.Object({
-	message: Type.String(),
-	capture_response: Type.Optional(Type.Boolean()),
-	on_reject: Type.Optional(
-		Type.Object({
-			prompt: Type.String(),
-			max_attempts: Type.Optional(Type.Integer({ minimum: 1 })),
-		}),
-	),
-});
-const plannotatorReviewSchema = Type.Object({
-	artifact: Type.Optional(Type.String()),
-	filePath: Type.Optional(Type.String()),
-	loopOnDenied: Type.Optional(Type.Boolean()),
-});
-const handoffSchema = Type.Object({
-	mode: Type.Literal("newSession"),
-	seed: Type.Union([
-		Type.Literal("approvedPlanOnly"),
-		Type.Literal("planOnly"),
-	]),
-	artifacts: Type.Optional(Type.Array(Type.String())),
-	required: Type.Optional(Type.Boolean()),
-});
-const subagentTaskSchema = Type.Object({
-	agent: Type.String(),
-	task: Type.String(),
-	model: Type.Optional(Type.String()),
-	thinking: Type.Optional(thinkingLevelSchema),
-	output: Type.Optional(Type.Union([Type.String(), Type.Boolean()])),
-});
-const subagentSchema = Type.Object({
-	agent: Type.Optional(Type.String()),
-	task: Type.Optional(Type.String()),
-	tasks: Type.Optional(Type.Array(subagentTaskSchema)),
-	context: Type.Optional(
-		Type.Union([Type.Literal("fresh"), Type.Literal("fork")]),
-	),
-	concurrency: Type.Optional(Type.Integer({ minimum: 1 })),
-	worktree: Type.Optional(Type.Boolean()),
-});
-const workerReviewLoopSchema = Type.Object({
-	worker: Type.Optional(Type.String()),
-	reviewer: Type.Optional(Type.String()),
-	maxRounds: Type.Integer({ minimum: 1 }),
-	scope: Type.Optional(
-		Type.Union([
-			Type.Literal("plan"),
-			Type.Literal("task"),
-			Type.Literal("diff"),
+const strictObjectOptions = { additionalProperties: false };
+const modelPolicySchema = Type.Object(
+	{
+		model: Type.Optional(Type.String()),
+		models: Type.Optional(Type.Array(Type.String())),
+		autoSelectModel: Type.Optional(Type.Boolean()),
+		thinking: Type.Optional(thinkingLevelSchema),
+	},
+	strictObjectOptions,
+);
+const workflowLoopSchema = Type.Object(
+	{
+		prompt: Type.Optional(Type.String()),
+		command: Type.Optional(Type.String()),
+		until: Type.String(),
+		max_iterations: Type.Integer({ minimum: 1 }),
+		fresh_context: Type.Optional(Type.Boolean()),
+		until_bash: Type.Optional(Type.String()),
+	},
+	strictObjectOptions,
+);
+const workflowApprovalSchema = Type.Object(
+	{
+		message: Type.String(),
+		capture_response: Type.Optional(Type.Boolean()),
+		on_reject: Type.Optional(
+			Type.Object(
+				{
+					prompt: Type.String(),
+					max_attempts: Type.Optional(Type.Integer({ minimum: 1 })),
+				},
+				strictObjectOptions,
+			),
+		),
+	},
+	strictObjectOptions,
+);
+const plannotatorReviewSchema = Type.Object(
+	{
+		artifact: Type.Optional(Type.String()),
+		filePath: Type.Optional(Type.String()),
+		loopOnDenied: Type.Optional(Type.Boolean()),
+	},
+	strictObjectOptions,
+);
+const handoffSchema = Type.Object(
+	{
+		mode: Type.Literal("newSession"),
+		seed: Type.Union([
+			Type.Literal("approvedPlanOnly"),
+			Type.Literal("planOnly"),
 		]),
-	),
-});
-const worktreeWaveSchema = Type.Object({
-	worker: Type.Optional(Type.String()),
-	reviewer: Type.Optional(Type.String()),
-	maxRounds: Type.Optional(Type.Integer({ minimum: 1 })),
-	parallelWorkers: Type.Optional(Type.Boolean()),
-});
-const workflowNodeSchema = Type.Object({
-	id: nonEmptyStringSchema,
-	depends_on: Type.Optional(Type.Array(Type.String())),
-	when: Type.Optional(Type.String()),
-	trigger_rule: Type.Optional(
-		Type.Union([
-			Type.Literal("all_success"),
-			Type.Literal("one_success"),
-			Type.Literal("none_failed_min_one_success"),
-		]),
-	),
-	command: Type.Optional(Type.String()),
-	prompt: Type.Optional(Type.String()),
-	bash: Type.Optional(Type.String()),
-	script: Type.Optional(Type.String()),
-	context: Type.Optional(
-		Type.Union([
-			Type.Literal("fresh"),
-			Type.Literal("newSession"),
-			Type.Literal("inherit"),
-		]),
-	),
-	model: Type.Optional(Type.String()),
-	thinking: Type.Optional(thinkingLevelSchema),
-	modelPolicy: Type.Optional(modelPolicySchema),
-	output_format: Type.Optional(Type.Unknown()),
-	output_artifact: Type.Optional(Type.String()),
-	timeout: Type.Optional(Type.Number()),
-	loop: Type.Optional(workflowLoopSchema),
-	approval: Type.Optional(workflowApprovalSchema),
-	plannotator_review: Type.Optional(plannotatorReviewSchema),
-	handoff: Type.Optional(handoffSchema),
-	subagent: Type.Optional(subagentSchema),
-	workerReviewLoop: Type.Optional(workerReviewLoopSchema),
-	worktreeWave: Type.Optional(worktreeWaveSchema),
-});
-const workflowDefinitionSchema = Type.Object({
-	name: nonEmptyStringSchema,
-	description: nonEmptyStringSchema,
-	modelPolicy: Type.Optional(Type.Record(Type.String(), modelPolicySchema)),
-	nodes: Type.Array(workflowNodeSchema, { minItems: 1 }),
-});
+		artifacts: Type.Optional(Type.Array(Type.String())),
+		required: Type.Optional(Type.Boolean()),
+	},
+	strictObjectOptions,
+);
+const subagentTaskSchema = Type.Object(
+	{
+		agent: Type.String(),
+		task: Type.String(),
+		model: Type.Optional(Type.String()),
+		thinking: Type.Optional(thinkingLevelSchema),
+		output: Type.Optional(Type.Union([Type.String(), Type.Boolean()])),
+	},
+	strictObjectOptions,
+);
+const subagentSchema = Type.Object(
+	{
+		agent: Type.Optional(Type.String()),
+		task: Type.Optional(Type.String()),
+		tasks: Type.Optional(Type.Array(subagentTaskSchema)),
+		context: Type.Optional(
+			Type.Union([Type.Literal("fresh"), Type.Literal("fork")]),
+		),
+		concurrency: Type.Optional(Type.Integer({ minimum: 1 })),
+		worktree: Type.Optional(Type.Boolean()),
+	},
+	strictObjectOptions,
+);
+const workerReviewLoopSchema = Type.Object(
+	{
+		worker: Type.Optional(Type.String()),
+		reviewer: Type.Optional(Type.String()),
+		maxRounds: Type.Integer({ minimum: 1 }),
+		scope: Type.Optional(
+			Type.Union([
+				Type.Literal("plan"),
+				Type.Literal("task"),
+				Type.Literal("diff"),
+			]),
+		),
+	},
+	strictObjectOptions,
+);
+const worktreeWaveSchema = Type.Object(
+	{
+		worker: Type.Optional(Type.String()),
+		reviewer: Type.Optional(Type.String()),
+		maxRounds: Type.Optional(Type.Integer({ minimum: 1 })),
+		parallelWorkers: Type.Optional(Type.Boolean()),
+	},
+	strictObjectOptions,
+);
+const workflowNodeSchema = Type.Object(
+	{
+		id: nonEmptyStringSchema,
+		depends_on: Type.Optional(Type.Array(Type.String())),
+		when: Type.Optional(Type.String()),
+		trigger_rule: Type.Optional(
+			Type.Union([
+				Type.Literal("all_success"),
+				Type.Literal("one_success"),
+				Type.Literal("none_failed_min_one_success"),
+			]),
+		),
+		command: Type.Optional(Type.String()),
+		prompt: Type.Optional(Type.String()),
+		bash: Type.Optional(Type.String()),
+		script: Type.Optional(Type.String()),
+		context: Type.Optional(
+			Type.Union([
+				Type.Literal("fresh"),
+				Type.Literal("newSession"),
+				Type.Literal("inherit"),
+			]),
+		),
+		model: Type.Optional(Type.String()),
+		thinking: Type.Optional(thinkingLevelSchema),
+		modelPolicy: Type.Optional(modelPolicySchema),
+		output_format: Type.Optional(Type.Unknown()),
+		output_artifact: Type.Optional(Type.String()),
+		timeout: Type.Optional(Type.Number()),
+		loop: Type.Optional(workflowLoopSchema),
+		approval: Type.Optional(workflowApprovalSchema),
+		plannotator_review: Type.Optional(plannotatorReviewSchema),
+		handoff: Type.Optional(handoffSchema),
+		subagent: Type.Optional(subagentSchema),
+		workerReviewLoop: Type.Optional(workerReviewLoopSchema),
+		worktreeWave: Type.Optional(worktreeWaveSchema),
+	},
+	strictObjectOptions,
+);
+const workflowDefinitionSchema = Type.Object(
+	{
+		name: nonEmptyStringSchema,
+		description: nonEmptyStringSchema,
+		modelPolicy: Type.Optional(Type.Record(Type.String(), modelPolicySchema)),
+		nodes: Type.Array(workflowNodeSchema, { minItems: 1 }),
+	},
+	strictObjectOptions,
+);
 
 async function listFiles(
 	dir: string,

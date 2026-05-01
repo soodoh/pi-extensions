@@ -20,8 +20,9 @@ import {
 describe("workflow utils", () => {
 	test("formats ids, timestamps, hashes, and home paths", () => {
 		const runId = makeRunId();
-		expect(runId).toMatch(/^pwf-[a-f0-9]{8}$/);
+		expect(runId).toMatch(/^pwf-[a-f0-9]{32}$/);
 		expect(isValidWorkflowRunId(runId)).toBe(true);
+		expect(isValidWorkflowRunId("pwf-11111111")).toBe(true);
 		expect(normalizeWorkflowRunId(` ${runId} `)).toBe(runId);
 		expect(isValidWorkflowRunId("../pwf-11111111")).toBe(false);
 		expect(() => normalizeWorkflowRunId("pwf-../bad")).toThrow(

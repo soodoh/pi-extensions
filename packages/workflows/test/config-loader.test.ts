@@ -72,4 +72,72 @@ nodes:
 			"node run references unknown command does-not-exist",
 		);
 	});
+
+	test("drops workflows with unknown root, node, and nested keys", async () => {
+		const home = await tempDir("pi-workflows-unknown-keys-home");
+		const cwd = await tempDir("pi-workflows-unknown-keys-cwd");
+		const extensionRoot = await tempDir("pi-workflows-unknown-keys-extension");
+		const workflowDir = join(extensionRoot, "workflows", "defaults");
+		const commandDir = join(extensionRoot, "commands", "defaults");
+		await mkdir(workflowDir, { recursive: true });
+		await mkdir(commandDir, { recursive: true });
+		await writeFile(
+			join(commandDir, "known.md"),
+			"Run known command\n",
+			"utf8",
+		);
+		await writeFile(
+			join(workflowDir, "unknown-root.yaml"),
+			`name: unknown-root
+
+description: Unknown root key
+unknownRoot: true
+
+nodes:
+  - id: run
+    command: known
+`,
+			"utf8",
+		);
+		await writeFile(
+			join(workflowDir, "unknown-node.yaml"),
+			`name: unknown-node
+
+description: Unknown node key
+
+nodes:
+  - id: run
+    command: known
+    dependsOn: [other]
+`,
+			"utf8",
+		);
+		await writeFile(
+			join(workflowDir, "unknown-nested.yaml"),
+			`name: unknown-nested
+
+description: Unknown nested key
+
+modelPolicy:
+  default:
+    model: auto
+    unexpected: true
+
+nodes:
+  - id: run
+    command: known
+`,
+			"utf8",
+		);
+
+		const { loadWorkflowConfig } = await importConfigLoaderWithHome(home);
+		const config = await loadWorkflowConfig(cwd, extensionRoot);
+
+		expect(config.workflows).toEqual([]);
+		expect(config.diagnostics).toHaveLength(3);
+		expect(config.diagnostics.join("\n")).toContain("unknown-root.yaml");
+		expect(config.diagnostics.join("\n")).toContain("unknown-node.yaml");
+		expect(config.diagnostics.join("\n")).toContain("unknown-nested.yaml");
+		expect(config.diagnostics.join("\n")).toContain("workflow schema");
+	});
 });

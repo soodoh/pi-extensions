@@ -130,6 +130,7 @@ describe("shared prompt history extension", () => {
 			);
 
 			await editor.onSubmit?.("submitted prompt");
+			await new Promise((resolve) => setTimeout(resolve, 10));
 
 			await expect(
 				readFile(tempHistory.historyPath, "utf8"),

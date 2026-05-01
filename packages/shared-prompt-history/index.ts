@@ -19,6 +19,7 @@ type HistoryCapableEditor = ReturnType<EditorFactory> & {
 interface SharedPromptHistoryState {
 	loaded: boolean;
 	lastPersistedPrompt: string | undefined;
+	persistQueue: Promise<void>;
 	wrappedSubmit: ((text: string) => void | Promise<void>) | undefined;
 }
 
@@ -54,6 +55,7 @@ function getState(editor: HistoryCapableEditor): SharedPromptHistoryState {
 	const nextState: SharedPromptHistoryState = {
 		loaded: false,
 		lastPersistedPrompt: undefined,
+		persistQueue: Promise.resolve(),
 		wrappedSubmit: undefined,
 	};
 	Reflect.set(editor, sharedPromptHistoryState, nextState);
@@ -80,10 +82,16 @@ async function persistPrompt(
 	const trimmed = text.trim();
 	if (!trimmed || trimmed === state.lastPersistedPrompt) return;
 
+	const previousPrompt = state.lastPersistedPrompt;
+	state.lastPersistedPrompt = trimmed;
 	try {
-		const appended = await appendPrompt(trimmed, historyPath);
-		if (appended) state.lastPersistedPrompt = trimmed;
+		await appendPrompt(trimmed, historyPath, {
+			lastPersistedPrompt: previousPrompt,
+		});
 	} catch {
+		if (state.lastPersistedPrompt === trimmed) {
+			state.lastPersistedPrompt = previousPrompt;
+		}
 		// Prompt history should never interfere with submitting a message.
 	}
 }
@@ -93,9 +101,13 @@ function wrapOnSubmit(editor: HistoryCapableEditor, historyPath: string): void {
 	const original = editor.onSubmit;
 	if (!original || original === state.wrappedSubmit) return;
 
-	state.wrappedSubmit = async (text: string) => {
-		await persistPrompt(editor, text, historyPath);
-		await original(text);
+	state.wrappedSubmit = (text: string) => {
+		state.persistQueue = state.persistQueue.then(
+			() => persistPrompt(editor, text, historyPath),
+			() => persistPrompt(editor, text, historyPath),
+		);
+		void state.persistQueue;
+		return original(text);
 	};
 	editor.onSubmit = state.wrappedSubmit;
 }

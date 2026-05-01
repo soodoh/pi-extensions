@@ -19,7 +19,7 @@
 	},
 	"scripts": {
 		"build": "tsc --noEmit",
-		"test": "vitest run --root ../.. packages/shared-prompt-history --passWithNoTests",
+		"test": "vitest run --root ../.. packages/shared-prompt-history",
 		"typecheck": "tsc --noEmit"
 	}
 }

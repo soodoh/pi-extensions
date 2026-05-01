@@ -15,7 +15,7 @@
 	},
 	"scripts": {
 		"build": "tsc --noEmit",
-		"test": "vitest run --root ../.. packages/auto-session-name --passWithNoTests",
+		"test": "vitest run --root ../.. packages/auto-session-name",
 		"typecheck": "tsc --noEmit"
 	}
 }

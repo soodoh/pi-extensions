@@ -56,6 +56,28 @@ describe("skill-started session naming", () => {
 		);
 	});
 
+	test("enforces the title cap for long fallback skill titles", () => {
+		const title = makeSessionTitle(
+			"very-long-skill-name-for-title-caps",
+			"",
+			24,
+		);
+
+		expect(title).toBe("very-long-skill-name-fo…");
+		expect(title.length).toBe(24);
+	});
+
+	test("enforces the title cap when the skill prefix alone is long", () => {
+		const title = makeSessionTitle(
+			"very-long-skill-name-for-title-caps",
+			"do it",
+			24,
+		);
+
+		expect(title).toBe("very-long-skill-name-fo…");
+		expect(title.length).toBe(24);
+	});
+
 	test("only auto-names unnamed skill-started sessions after the first turn", () => {
 		expect(
 			shouldNameAfterTurn({

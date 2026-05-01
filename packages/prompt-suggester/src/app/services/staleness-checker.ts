@@ -1,4 +1,3 @@
-import path from "node:path";
 import type { PromptSuggesterConfig } from "../../config/types";
 import {
 	CURRENT_GENERATOR_VERSION,
@@ -9,6 +8,7 @@ import {
 } from "../../domain/seed";
 import type { FileHash } from "../ports/file-hash";
 import type { VcsClient } from "../ports/vcs-client";
+import { resolveProjectFile } from "./project-file";
 import { computeConfigFingerprint } from "./seed-metadata";
 
 interface StalenessCheckerDeps {
@@ -74,9 +74,15 @@ export class StalenessChecker {
 
 		const changedKeyFiles: string[] = [];
 		for (const keyFile of seed.keyFiles) {
-			const absolute = path.join(this.cwd, keyFile.path);
+			const resolved = await resolveProjectFile(this.cwd, keyFile.path);
+			if (!resolved) {
+				changedKeyFiles.push(keyFile.path);
+				continue;
+			}
 			try {
-				const currentHash = await this.deps.fileHash.hashFile(absolute);
+				const currentHash = await this.deps.fileHash.hashFile(
+					resolved.absolutePath,
+				);
 				if (currentHash !== keyFile.hash) changedKeyFiles.push(keyFile.path);
 			} catch {
 				changedKeyFiles.push(keyFile.path);

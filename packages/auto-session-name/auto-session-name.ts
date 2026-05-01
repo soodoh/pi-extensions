@@ -63,6 +63,12 @@ export const extractUserRequest = (text: string): string => {
 const compactWhitespace = (text: string): string =>
 	text.replace(/\s+/g, " ").trim();
 
+const truncateTitle = (title: string, maxLength: number): string => {
+	if (title.length <= maxLength) return title;
+	if (maxLength <= 1) return "…";
+	return `${title.slice(0, maxLength - 1).trimEnd()}…`;
+};
+
 export const makeSessionTitle = (
 	skillName: string,
 	request: string,
@@ -70,17 +76,11 @@ export const makeSessionTitle = (
 ): string => {
 	const cleanRequest = compactWhitespace(request);
 	if (!cleanRequest) {
-		return `${skillName} skill session`;
+		return truncateTitle(`${skillName} skill session`, maxLength);
 	}
 
 	const prefix = `${skillName}: `;
-	const fullTitle = `${prefix}${cleanRequest}`;
-	if (fullTitle.length <= maxLength) {
-		return fullTitle;
-	}
-
-	const requestLength = Math.max(1, maxLength - prefix.length - 1);
-	return `${prefix}${cleanRequest.slice(0, requestLength).trimEnd()}…`;
+	return truncateTitle(`${prefix}${cleanRequest}`, maxLength);
 };
 
 export const shouldNameAfterTurn = ({

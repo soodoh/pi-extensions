@@ -1,7 +1,4 @@
-import type {
-	ExtensionAPI,
-	ExtensionContext,
-} from "@mariozechner/pi-coding-agent";
+import type { ExtensionContext } from "@mariozechner/pi-coding-agent";
 import { CustomEditor } from "@mariozechner/pi-coding-agent";
 
 import {
@@ -26,6 +23,25 @@ interface SharedPromptHistoryState {
 }
 
 const sharedPromptHistoryState = Symbol("sharedPromptHistoryState");
+
+interface SharedPromptHistoryOptions {
+	historyPath?: string;
+	home?: string;
+}
+
+type SharedPromptHistoryContext = {
+	ui: Pick<ExtensionContext["ui"], "setEditorComponent">;
+};
+
+type SharedPromptHistoryApi = {
+	on(
+		event: "session_start",
+		handler: (
+			event: unknown,
+			ctx: SharedPromptHistoryContext,
+		) => void | Promise<void>,
+	): void;
+};
 
 class SharedPromptHistoryEditor extends CustomEditor {}
 
@@ -97,9 +113,13 @@ function enhanceEditor(
 	queueMicrotask(() => wrapOnSubmit(editor, historyPath));
 }
 
-export default function sharedPromptHistory(pi: ExtensionAPI) {
+export default function sharedPromptHistory(
+	pi: SharedPromptHistoryApi,
+	options: SharedPromptHistoryOptions = {},
+) {
 	pi.on("session_start", async (_event, ctx) => {
-		const historyPath = getPromptHistoryPath();
+		const historyPath =
+			options.historyPath ?? getPromptHistoryPath({ home: options.home });
 		const history = await readPromptHistory(historyPath);
 
 		const originalSetEditorComponent = ctx.ui.setEditorComponent.bind(ctx.ui);

@@ -1,5 +1,3 @@
-import { promises as fs } from "node:fs";
-import path from "node:path";
 import { toInvocationThinkingLevel } from "../../config/inference";
 import type { PromptSuggesterConfig } from "../../config/types";
 import {
@@ -19,16 +17,8 @@ import type { SeedStore } from "../ports/seed-store";
 import type { StateStore } from "../ports/state-store";
 import type { TaskQueue } from "../ports/task-queue";
 import type { VcsClient } from "../ports/vcs-client";
+import { resolveProjectFile } from "../services/project-file";
 import { computeConfigFingerprint } from "../services/seed-metadata";
-
-async function fileExists(filePath: string): Promise<boolean> {
-	try {
-		await fs.access(filePath);
-		return true;
-	} catch {
-		return false;
-	}
-}
 
 function createRunId(): string {
 	return `seed-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
@@ -220,64 +210,39 @@ export class ReseedRunner {
 			category: SeedArtifact["keyFiles"][number]["category"];
 		}>,
 	): Promise<SeedArtifact["keyFiles"]> {
-		const normalizeToRepoRelative = (inputPath: string): string | undefined => {
-			const trimmed = inputPath.trim();
-			if (!trimmed) return undefined;
-			const absolute = path.isAbsolute(trimmed)
-				? path.normalize(trimmed)
-				: path.resolve(this.cwd, trimmed);
-			if (
-				absolute !== this.cwd &&
-				!absolute.startsWith(`${this.cwd}${path.sep}`)
-			)
-				return undefined;
-			const relative = path.relative(this.cwd, absolute);
-			if (!relative || relative === ".") return undefined;
-			if (relative.startsWith(`..${path.sep}`) || relative === "..")
-				return undefined;
-			return path.normalize(relative);
-		};
+		const uniqueCandidates = new Map<
+			string,
+			{
+				absolutePath: string;
+				path: string;
+				whyImportant: string;
+				category: SeedArtifact["keyFiles"][number]["category"];
+			}
+		>();
 
-		const uniqueCandidates = Array.from(
-			new Map(
-				candidateKeyFiles
-					.map((file) => {
-						const normalizedPath = normalizeToRepoRelative(file.path);
-						if (!normalizedPath) return undefined;
-						return {
-							path: normalizedPath,
-							whyImportant:
-								file.whyImportant.trim() || "High-signal repository file",
-							category: file.category,
-						};
-					})
-					.filter(
-						(
-							file,
-						): file is {
-							path: string;
-							whyImportant: string;
-							category: SeedArtifact["keyFiles"][number]["category"];
-						} => Boolean(file),
-					)
-					.map((file) => [file.path, file]),
-			).values(),
-		);
+		for (const file of candidateKeyFiles) {
+			const resolved = await resolveProjectFile(this.cwd, file.path);
+			if (!resolved || uniqueCandidates.has(resolved.relativePath)) continue;
+			uniqueCandidates.set(resolved.relativePath, {
+				absolutePath: resolved.absolutePath,
+				path: resolved.relativePath,
+				whyImportant: file.whyImportant.trim() || "High-signal repository file",
+				category: file.category,
+			});
+			if (uniqueCandidates.size >= 32) break;
+		}
 
-		const chosen = uniqueCandidates.slice(0, 32);
-		if (chosen.length === 0) {
+		if (uniqueCandidates.size === 0) {
 			throw new Error(
 				"Seeder returned no keyFiles. Agentic seeding requires explicit key file selection.",
 			);
 		}
 
 		const hashed: SeedArtifact["keyFiles"] = [];
-		for (const file of chosen) {
-			const absolute = path.resolve(this.cwd, file.path);
-			if (!(await fileExists(absolute))) continue;
+		for (const file of uniqueCandidates.values()) {
 			hashed.push({
 				path: file.path,
-				hash: await this.deps.fileHash.hashFile(absolute),
+				hash: await this.deps.fileHash.hashFile(file.absolutePath),
 				whyImportant: file.whyImportant,
 				category: file.category,
 			});

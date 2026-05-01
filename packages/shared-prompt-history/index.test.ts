@@ -1,132 +1,191 @@
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
-import { dirname } from "node:path";
-import { afterEach, describe, expect, test } from "vitest";
-import { getPromptHistoryPath } from "./history-store";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+import { describe, expect, test } from "vitest";
 import sharedPromptHistory from "./index";
 
-let originalHistory: string | undefined;
-let historyIsIsolated = false;
+type SharedPromptHistoryApi = Parameters<typeof sharedPromptHistory>[0];
+type SessionStartHandler = Parameters<SharedPromptHistoryApi["on"]>[1];
+type TestContext = Parameters<SessionStartHandler>[1];
+type EditorFactory = NonNullable<
+	Parameters<TestContext["ui"]["setEditorComponent"]>[0]
+>;
 
-async function isolatePromptHistory() {
-	if (historyIsIsolated) return;
+type TempHistory = {
+	home: string;
+	historyPath: string;
+};
 
-	try {
-		originalHistory = await readFile(getPromptHistoryPath(), "utf8");
-	} catch (error) {
-		if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-		originalHistory = undefined;
-	}
+type HistoryTestEditor = {
+	addToHistory(text: string): void;
+	onSubmit?: (text: string) => void | Promise<void>;
+};
 
-	await rm(getPromptHistoryPath(), { force: true });
-	historyIsIsolated = true;
+type HistoryInspectableEditor = {
+	history: string[];
+};
+
+function isObjectRecord(value: unknown): value is Record<PropertyKey, unknown> {
+	return typeof value === "object" && value !== null;
 }
 
-async function registerExtension(ctx: unknown) {
+function isHistoryTestEditor(value: unknown): value is HistoryTestEditor {
+	if (!isObjectRecord(value)) return false;
+	return (
+		typeof value.addToHistory === "function" &&
+		(value.onSubmit === undefined || typeof value.onSubmit === "function")
+	);
+}
+
+function isHistoryInspectableEditor(
+	value: unknown,
+): value is HistoryInspectableEditor {
+	if (!isObjectRecord(value)) return false;
+	return (
+		Array.isArray(value.history) &&
+		value.history.every((entry) => typeof entry === "string")
+	);
+}
+
+function invokeEditorFactory(factory: EditorFactory): unknown {
+	return Reflect.apply(factory, undefined, [{}, {}, { matches: () => false }]);
+}
+
+async function createTempHistory(): Promise<TempHistory> {
+	const home = await mkdtemp(join(tmpdir(), "pi-prompt-history-home-"));
+	return {
+		home,
+		historyPath: join(home, ".local", "state", "pi", "prompt-history.jsonl"),
+	};
+}
+
+async function registerExtension(ctx: TestContext, historyPath: string) {
 	let sessionStart:
-		| ((event: unknown, ctx: unknown) => Promise<void>)
+		| ((event: unknown, ctx: TestContext) => void | Promise<void>)
 		| undefined;
-	sharedPromptHistory({
-		on(event: string, handler: typeof sessionStart) {
-			if (event === "session_start") sessionStart = handler;
+	sharedPromptHistory(
+		{
+			on(event, handler) {
+				if (event === "session_start") sessionStart = handler;
+			},
 		},
-	} as never);
+		{ historyPath },
+	);
 
 	await sessionStart?.({}, ctx);
 }
 
-async function createEditor(onSubmit?: (text: string) => void | Promise<void>) {
-	let factory:
-		| ((tui: unknown, theme: unknown, keybindings: unknown) => unknown)
-		| undefined;
-	await registerExtension({
-		ui: {
-			setEditorComponent(value: typeof factory) {
-				factory = value;
+async function createEditor(
+	historyPath: string,
+	onSubmit?: (text: string) => void | Promise<void>,
+) {
+	let factory: EditorFactory | undefined;
+	await registerExtension(
+		{
+			ui: {
+				setEditorComponent(value) {
+					factory = value;
+				},
 			},
 		},
-	});
+		historyPath,
+	);
 
 	if (!factory) throw new Error("editor factory was not registered");
-	const editor = factory({}, {}, { matches: () => false }) as {
-		addToHistory(text: string): void;
-		onSubmit?: (text: string) => void | Promise<void>;
-	};
+	const editor = invokeEditorFactory(factory);
+	if (!isHistoryTestEditor(editor)) {
+		throw new Error("editor does not expose test history hooks");
+	}
 	if (onSubmit) editor.onSubmit = onSubmit;
 
 	await new Promise<void>((resolve) => queueMicrotask(() => resolve()));
 	return editor;
 }
 
-afterEach(async () => {
-	if (!historyIsIsolated) return;
-
-	if (originalHistory === undefined) {
-		await rm(getPromptHistoryPath(), { force: true });
-	} else {
-		await mkdir(dirname(getPromptHistoryPath()), { recursive: true });
-		await writeFile(getPromptHistoryPath(), originalHistory, "utf8");
-	}
-
-	originalHistory = undefined;
-	historyIsIsolated = false;
-});
-
 describe("shared prompt history extension", () => {
 	test("does not persist history entries replayed by pi", async () => {
-		await isolatePromptHistory();
-		const editor = await createEditor();
+		const tempHistory = await createTempHistory();
+		try {
+			const editor = await createEditor(tempHistory.historyPath);
 
-		editor.addToHistory("expanded session prompt replayed on startup");
-		await new Promise((resolve) => setTimeout(resolve, 10));
+			editor.addToHistory("expanded session prompt replayed on startup");
+			await new Promise((resolve) => setTimeout(resolve, 10));
 
-		await expect(
-			readFile(getPromptHistoryPath(), "utf8"),
-		).rejects.toMatchObject({ code: "ENOENT" });
+			await expect(
+				readFile(tempHistory.historyPath, "utf8"),
+			).rejects.toMatchObject({
+				code: "ENOENT",
+			});
+		} finally {
+			await rm(tempHistory.home, { recursive: true, force: true });
+		}
 	});
 
 	test("persists prompts submitted through the editor", async () => {
-		await isolatePromptHistory();
-		const editor = await createEditor(async () => {});
+		const tempHistory = await createTempHistory();
+		try {
+			const editor = await createEditor(
+				tempHistory.historyPath,
+				async () => {},
+			);
 
-		await editor.onSubmit?.("submitted prompt");
+			await editor.onSubmit?.("submitted prompt");
 
-		await expect(readFile(getPromptHistoryPath(), "utf8")).resolves.toContain(
-			"submitted prompt",
-		);
+			await expect(
+				readFile(tempHistory.historyPath, "utf8"),
+			).resolves.toContain("submitted prompt");
+		} finally {
+			await rm(tempHistory.home, { recursive: true, force: true });
+		}
 	});
 
 	test("loads shared history into editor components registered by later extensions", async () => {
-		await isolatePromptHistory();
-		await writeFile(
-			getPromptHistoryPath(),
-			`${JSON.stringify({ prompt: "existing prompt" })}\n`,
-			"utf8",
-		);
+		const tempHistory = await createTempHistory();
+		try {
+			await mkdir(dirname(tempHistory.historyPath), { recursive: true });
+			await writeFile(
+				tempHistory.historyPath,
+				`${JSON.stringify({ prompt: "existing prompt" })}\n`,
+				"utf8",
+			);
 
-		let factory:
-			| ((tui: unknown, theme: unknown, keybindings: unknown) => unknown)
-			| undefined;
-		const ctx = {
-			ui: {
-				setEditorComponent(value: typeof factory) {
-					factory = value;
-				},
-			},
-		};
-
-		await registerExtension(ctx);
-		ctx.ui.setEditorComponent(() => {
-			const history: string[] = [];
-			return {
-				history,
-				addToHistory(text: string) {
-					history.unshift(text.trim());
+			let factory: EditorFactory | undefined;
+			const ctx: TestContext = {
+				ui: {
+					setEditorComponent(value) {
+						factory = value;
+					},
 				},
 			};
-		});
 
-		const editor = factory?.({}, {}, {}) as { history: string[] } | undefined;
+			await registerExtension(ctx, tempHistory.historyPath);
+			ctx.ui.setEditorComponent(() => {
+				const history: string[] = [];
+				return {
+					history,
+					addToHistory(text: string) {
+						history.unshift(text.trim());
+					},
+					getText() {
+						return "";
+					},
+					setText() {},
+					handleInput() {},
+					render() {
+						return [];
+					},
+					invalidate() {},
+				};
+			});
 
-		expect(editor?.history).toEqual(["existing prompt"]);
+			const editor = factory ? invokeEditorFactory(factory) : undefined;
+			if (!isHistoryInspectableEditor(editor)) {
+				throw new Error("editor does not expose test history state");
+			}
+
+			expect(editor.history).toEqual(["existing prompt"]);
+		} finally {
+			await rm(tempHistory.home, { recursive: true, force: true });
+		}
 	});
 });

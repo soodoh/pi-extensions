@@ -36,7 +36,9 @@ type StatuslineContext = {
 		getApiKeyForProvider(provider: string): Promise<string | undefined>;
 		isUsingOAuth?(model: { provider?: string }): boolean;
 		authStorage?: {
-			get(provider: string): { type: "oauth"; refresh?: string } | undefined;
+			get(
+				provider: string,
+			): { type: "oauth"; access?: string; refresh?: string } | undefined;
 		};
 	};
 	sessionManager: { getBranch(): unknown[] };
@@ -110,7 +112,7 @@ describe("statusline extension", () => {
 		expect(line).toContain("25.0%/1.0k");
 	});
 
-	test("uses stored GitHub Copilot refresh credential for OAuth usage", async () => {
+	test("uses stored GitHub Copilot access credential for OAuth usage", async () => {
 		const fetchCalls: RequestInit[] = [];
 		const fetchMock = vi.fn(
 			async (_url: string | URL | Request, init?: RequestInit) => {
@@ -141,7 +143,7 @@ describe("statusline extension", () => {
 						return [];
 					},
 					async getApiKeyForProvider() {
-						return undefined;
+						return "provider-token";
 					},
 					isUsingOAuth() {
 						return true;
@@ -149,7 +151,11 @@ describe("statusline extension", () => {
 					authStorage: {
 						get(provider) {
 							return provider === "github-copilot"
-								? { type: "oauth", refresh: "stored-refresh-token" }
+								? {
+										type: "oauth",
+										access: "stored-access-token",
+										refresh: "stored-refresh-token",
+									}
 								: undefined;
 						},
 					},
@@ -164,7 +170,7 @@ describe("statusline extension", () => {
 
 			await vi.waitFor(() => expect(fetchMock).toHaveBeenCalled());
 			expect(fetchCalls[0].headers).toMatchObject({
-				Authorization: "token stored-refresh-token",
+				Authorization: "token stored-access-token",
 			});
 		} finally {
 			vi.unstubAllGlobals();

@@ -1,3 +1,5 @@
+import path from "node:path";
+import type { AgentMessage } from "@mariozechner/pi-agent-core";
 import type {
 	ExtensionAPI,
 	ExtensionContext,
@@ -5,7 +7,12 @@ import type {
 } from "@mariozechner/pi-coding-agent";
 import { buildLatestHistoricalTurnContext } from "./app/services/conversation-signals";
 import { type AppComposition, createAppComposition } from "./composition/root";
-import { PiExtensionAdapter } from "./infra/pi/extension-adapter";
+import {
+	PiExtensionAdapter,
+	type PiExtensionEventApi,
+	type PromptSuggesterBranchEntry,
+	type PromptSuggesterExtensionContext,
+} from "./infra/pi/extension-adapter";
 import {
 	type GhostEditorInstallState,
 	syncGhostEditorDecorator,
@@ -13,8 +20,44 @@ import {
 import { refreshSuggesterUi } from "./infra/pi/ui-adapter";
 import { createUiContext, type UiContextLike } from "./infra/pi/ui-context";
 
-export default function suggester(pi: ExtensionAPI) {
-	let compositionPromise: Promise<AppComposition> | undefined;
+export type PromptSuggesterApi = PiExtensionEventApi &
+	Pick<ExtensionAPI, "getThinkingLevel">;
+
+function isObjectRecord(value: unknown): value is Record<PropertyKey, unknown> {
+	return typeof value === "object" && value !== null;
+}
+
+function isAgentMessage(value: unknown): value is AgentMessage {
+	if (!isObjectRecord(value)) return false;
+	return (
+		value.role === "user" ||
+		value.role === "assistant" ||
+		value.role === "toolResult"
+	);
+}
+
+function isHistoricalBranchEntry(
+	entry: PromptSuggesterBranchEntry,
+): entry is PromptSuggesterBranchEntry & {
+	type: "message";
+	id: string;
+	message: AgentMessage;
+} {
+	return (
+		entry.type === "message" &&
+		typeof entry.id === "string" &&
+		isAgentMessage(entry.message)
+	);
+}
+
+function isExtensionContext(
+	ctx: PromptSuggesterExtensionContext,
+): ctx is ExtensionContext {
+	return "ui" in ctx;
+}
+
+export default function suggester(pi: PromptSuggesterApi) {
+	const compositionPromises = new Map<string, Promise<AppComposition>>();
 	let ghostEditorInstallState: GhostEditorInstallState | undefined;
 
 	function syncGhostEditorInstallation(
@@ -38,29 +81,38 @@ export default function suggester(pi: ExtensionAPI) {
 		});
 	}
 
-	async function getComposition(): Promise<AppComposition> {
+	function resolveSessionCwd(ctx: PromptSuggesterExtensionContext): string {
+		return path.resolve(ctx.sessionManager.getCwd() || process.cwd());
+	}
+
+	async function getComposition(cwd: string): Promise<AppComposition> {
+		let compositionPromise = compositionPromises.get(cwd);
 		if (!compositionPromise) {
-			compositionPromise = createAppComposition(pi).catch((error) => {
-				compositionPromise = undefined;
+			compositionPromise = createAppComposition(pi, cwd).catch((error) => {
+				compositionPromises.delete(cwd);
 				throw error;
 			});
+			compositionPromises.set(cwd, compositionPromise);
 		}
 		return await compositionPromise;
 	}
 
 	async function setRuntimeContext(
-		ctx: ExtensionContext,
+		ctx: PromptSuggesterExtensionContext,
 	): Promise<AppComposition> {
-		const composition = await getComposition();
-		composition.runtimeRef.setContext(ctx);
+		const composition = await getComposition(resolveSessionCwd(ctx));
+		if (isExtensionContext(ctx)) composition.runtimeRef.setContext(ctx);
 		return composition;
 	}
 
-	async function clearRuntimeContext(ctx: ExtensionContext): Promise<void> {
+	async function clearRuntimeContext(
+		ctx: PromptSuggesterExtensionContext,
+	): Promise<void> {
+		const compositionPromise = compositionPromises.get(resolveSessionCwd(ctx));
 		if (!compositionPromise) return;
 		try {
 			const composition = await compositionPromise;
-			composition.runtimeRef.clearContext(ctx);
+			if (isExtensionContext(ctx)) composition.runtimeRef.clearContext(ctx);
 		} catch {
 			// If composition failed during startup, there is no runtime context to clear.
 		}
@@ -75,10 +127,10 @@ export default function suggester(pi: ExtensionAPI) {
 	}
 
 	function syncSuggestionUi(
-		ctx: ExtensionContext,
+		ctx: PromptSuggesterExtensionContext,
 		composition: AppComposition,
 	): void {
-		if (!ctx.hasUI) return;
+		if (!isExtensionContext(ctx) || !ctx.hasUI) return;
 		syncGhostEditorInstallation(ctx, composition);
 		refreshSuggesterUi(getUiContext(composition));
 	}
@@ -107,13 +159,7 @@ export default function suggester(pi: ExtensionAPI) {
 
 			const branchEntries = ctx.sessionManager
 				.getBranch()
-				.filter(
-					(
-						entry,
-					): entry is ReturnType<
-						typeof ctx.sessionManager.getBranch
-					>[number] & { type: "message" } => entry.type === "message",
-				);
+				.filter(isHistoricalBranchEntry);
 			const historicalTurn = buildLatestHistoricalTurnContext({
 				branchEntries,
 			});

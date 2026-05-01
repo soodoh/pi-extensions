@@ -10,6 +10,10 @@ interface ConfigLoader {
 	load(): Promise<PromptSuggesterConfig>;
 }
 
+type PiSettingsSuggesterOverride = {
+	inference?: Partial<PromptSuggesterConfig["inference"]>;
+};
+
 function isObject(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -57,7 +61,7 @@ const PACKAGE_DEFAULT_CONFIG_PATH = path.resolve(
 
 async function readPiSettingsSuggesterOverride(
 	settingsPath: string,
-): Promise<Partial<PromptSuggesterConfig> | undefined> {
+): Promise<PiSettingsSuggesterOverride | undefined> {
 	let settings: unknown;
 	try {
 		settings = await readJsonIfExists(settingsPath);
@@ -85,9 +89,7 @@ async function readPiSettingsSuggesterOverride(
 	return {
 		inference: {
 			suggesterModel,
-		} as Partial<
-			PromptSuggesterConfig["inference"]
-		> as PromptSuggesterConfig["inference"],
+		},
 	};
 }
 

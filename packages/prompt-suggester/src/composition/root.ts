@@ -42,8 +42,10 @@ export interface AppComposition {
 	};
 }
 
+export type AppCompositionApi = Pick<ExtensionAPI, "getThinkingLevel">;
+
 export async function createAppComposition(
-	pi: ExtensionAPI,
+	pi: AppCompositionApi,
 	cwd: string = process.cwd(),
 ): Promise<AppComposition> {
 	const config = await new FileConfigLoader(cwd).load();

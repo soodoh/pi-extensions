@@ -9,7 +9,7 @@ import {
 	writeFile,
 } from "node:fs/promises";
 import { homedir } from "node:os";
-import { dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const WORKFLOW_RUN_ID_PATTERN =
@@ -39,11 +39,18 @@ export function sha256(text: string): string {
 export function homePath(...parts: string[]): string {
 	return join(homedir(), ...parts);
 }
+export function relativePathEscapesRoot(relativePath: string): boolean {
+	return (
+		relativePath === ".." ||
+		relativePath.startsWith(`..${sep}`) ||
+		isAbsolute(relativePath)
+	);
+}
 export function ensureInsideCwd(cwd: string, path: string): string {
 	const full = isAbsolute(path) ? resolve(path) : resolve(cwd, path);
 	const root = resolve(cwd);
 	const relativePath = relative(root, full);
-	if (relativePath.startsWith("..") || isAbsolute(relativePath))
+	if (relativePathEscapesRoot(relativePath))
 		throw new Error(`Path must be inside cwd: ${path}`);
 	return full;
 }
@@ -57,7 +64,7 @@ export async function ensureRealPathInsideCwd(
 		realpath(full),
 	]);
 	const relativePath = relative(realRoot, realFull);
-	if (relativePath.startsWith("..") || isAbsolute(relativePath))
+	if (relativePathEscapesRoot(relativePath))
 		throw new Error(`Path must be inside cwd: ${path}`);
 	return realFull;
 }

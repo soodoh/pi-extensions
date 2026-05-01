@@ -203,6 +203,81 @@ nodes:
 		expect(kickoff).toContain('loop: {"until":"done","max_iterations":2}');
 	});
 
+	test("execute-plan rejects a missing plan path with validation error", async () => {
+		const home = await tempDir("pi-workflows-runner-missing-home");
+		const cwd = await tempDir("pi-workflows-runner-missing-cwd");
+		const { WorkflowRunner } = await importRunnerWithHome(home);
+		const runner = new WorkflowRunner(
+			{
+				events: {
+					emit: () => {},
+					on: () => undefined,
+				},
+				appendEntry: () => {},
+			},
+			pathToFileURL(new URL("../index.ts", import.meta.url).pathname).href,
+		);
+
+		await expect(
+			runner.startWorkflow("execute-plan", "missing-plan.md", workflowCtx(cwd)),
+		).rejects.toThrow(/Plan must be an existing markdown file/);
+	});
+
+	test("plan approval rejects a missing plan path with validation error", async () => {
+		const home = await tempDir("pi-workflows-runner-missing-artifact-home");
+		const cwd = await tempDir("pi-workflows-runner-missing-artifact-cwd");
+		const { WorkflowRunner } = await importRunnerWithHome(home);
+		const { saveRun } = await import("../src/store");
+		const sessionFile = join(cwd, "planning-session.json");
+		await saveRun({
+			...runRecord("pwf-77777777", cwd, "planning"),
+			planningSessionPath: sessionFile,
+		});
+		const runner = new WorkflowRunner(
+			{
+				events: {
+					emit: () => {},
+					on: () => undefined,
+				},
+			},
+			pathToFileURL(new URL("../index.ts", import.meta.url).pathname).href,
+		);
+
+		await expect(
+			runner.approvePlan(
+				"pwf-77777777",
+				"missing-plan.md",
+				undefined,
+				workflowCtx(cwd, sessionFile),
+			),
+		).rejects.toThrow(/Plan must be an existing markdown file/);
+	});
+
+	test("execute-plan rejects oversized plan markdown before embedding", async () => {
+		const home = await tempDir("pi-workflows-runner-large-home");
+		const cwd = await tempDir("pi-workflows-runner-large-cwd");
+		await writeFile(
+			join(cwd, "large-plan.md"),
+			"a".repeat(1024 * 1024 + 1),
+			"utf8",
+		);
+		const { WorkflowRunner } = await importRunnerWithHome(home);
+		const runner = new WorkflowRunner(
+			{
+				events: {
+					emit: () => {},
+					on: () => undefined,
+				},
+				appendEntry: () => {},
+			},
+			pathToFileURL(new URL("../index.ts", import.meta.url).pathname).href,
+		);
+
+		await expect(
+			runner.startWorkflow("execute-plan", "large-plan.md", workflowCtx(cwd)),
+		).rejects.toThrow(/Plan markdown file is too large/);
+	});
+
 	test("execute-plan handoff excludes the existing-plan loader node", async () => {
 		const home = await tempDir("pi-workflows-runner-home");
 		const cwd = await tempDir("pi-workflows-runner-cwd");
@@ -292,6 +367,65 @@ nodes:
 		expect((await getRun("pwf-33333333"))?.executionSessionPath).toBe(
 			run.executionSessionPath,
 		);
+	});
+
+	test("continueExecution serializes concurrent calls for an approved run", async () => {
+		const home = await tempDir("pi-workflows-runner-concurrent-home");
+		const cwd = await tempDir("pi-workflows-runner-concurrent-cwd");
+		await writeFile(
+			join(cwd, "plan.md"),
+			"# Plan\n\n- [ ] Update one file\n",
+			"utf8",
+		);
+		const { WorkflowRunner } = await importRunnerWithHome(home);
+		const { getRun, saveRun } = await import("../src/store");
+		await saveRun({
+			...runRecord("pwf-88888888", cwd, "approved"),
+			planPath: "plan.md",
+		});
+		const runner = new WorkflowRunner(
+			{
+				events: {
+					emit: () => {},
+					on: () => undefined,
+				},
+			},
+			pathToFileURL(new URL("../index.ts", import.meta.url).pathname).href,
+		);
+		let newSessionCalls = 0;
+		let releaseFirstSession: () => void = () => {};
+		const firstSessionBlocked = new Promise<void>((resolve) => {
+			releaseFirstSession = resolve;
+		});
+		const ctx: WorkflowContext = {
+			cwd,
+			async sendUserMessage() {},
+			async newSession(options) {
+				newSessionCalls += 1;
+				await options.setup?.({
+					getSessionFile: () => join(cwd, "execution-session.json"),
+					appendSessionInfo: () => {},
+					appendMessage: () => {},
+				});
+				await options.withSession({
+					...workflowCtx(cwd, join(cwd, "execution-session.json")),
+				});
+				if (newSessionCalls === 1) await firstSessionBlocked;
+			},
+		};
+
+		const first = runner.continueExecution("pwf-88888888", ctx);
+		while (newSessionCalls === 0) {
+			await new Promise((resolve) => setTimeout(resolve, 0));
+		}
+		const second = runner.continueExecution("pwf-88888888", ctx);
+		await new Promise((resolve) => setTimeout(resolve, 10));
+		expect(newSessionCalls).toBe(1);
+		releaseFirstSession();
+		await Promise.all([first, second]);
+
+		expect(newSessionCalls).toBe(1);
+		expect((await getRun("pwf-88888888"))?.phase).toBe("executing");
 	});
 
 	test("continueExecution fails clearly for executing runs without a recorded session", async () => {

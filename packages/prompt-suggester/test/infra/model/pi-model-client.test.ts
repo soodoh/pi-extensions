@@ -585,6 +585,18 @@ test("PiModelClient seeder tools operate on the checked real path", async () => 
 	expect(preview).not.toContain("linked-safe/visible.txt");
 });
 
+test("PiModelClient seeder tools allow filenames that begin with dot-dot", async () => {
+	const cwd = await tempDir("pi-suggester-dotdot-name");
+	await writeFile(join(cwd, "..plan.md"), "# Plan\n", "utf8");
+	await writeFile(join(cwd, "visible.txt"), "visible\n", "utf8");
+
+	const preview = await runSeederToolPreview(cwd, "read", {
+		path: "..plan.md",
+	});
+
+	expect(preview).toContain("1: # Plan");
+});
+
 test("PiModelClient read tool returns a bounded slice for large files", async () => {
 	const cwd = await tempDir("pi-suggester-read");
 	const largePath = join(cwd, "large.txt");

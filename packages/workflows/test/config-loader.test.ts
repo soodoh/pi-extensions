@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -245,5 +245,43 @@ nodes:
 		expect(config.diagnostics.join("\n")).toContain("unknown-node.yaml");
 		expect(config.diagnostics.join("\n")).toContain("unknown-nested.yaml");
 		expect(config.diagnostics.join("\n")).toContain("workflow schema");
+	});
+
+	test("skips project-local config directories that resolve outside cwd", async () => {
+		const home = await tempDir("pi-workflows-symlink-home");
+		const cwd = await tempDir("pi-workflows-symlink-cwd");
+		const outside = await tempDir("pi-workflows-symlink-outside");
+		const extensionRoot = await tempDir("pi-workflows-symlink-extension");
+		await mkdir(join(outside, "workflows"), { recursive: true });
+		await mkdir(join(outside, "workflow-commands"), { recursive: true });
+		await writeFile(
+			join(outside, "workflow-commands", "known.md"),
+			"Run outside command\n",
+			"utf8",
+		);
+		await writeFile(
+			join(outside, "workflows", "outside.yaml"),
+			`name: outside
+
+	description: Outside project-local workflow
+
+	nodes:
+	  - id: run
+	    command: known
+	`,
+			"utf8",
+		);
+		await symlink(outside, join(cwd, ".pi"));
+
+		const { loadWorkflowConfig } = await importConfigLoaderWithHome(home);
+		const config = await loadWorkflowConfig(cwd, extensionRoot);
+
+		expect(config.workflows.map((workflow) => workflow.name)).not.toContain(
+			"outside",
+		);
+		expect(config.commands.map((command) => command.name)).not.toContain(
+			"known",
+		);
+		expect(config.diagnostics.join("\n")).toContain("outside workflow cwd");
 	});
 });

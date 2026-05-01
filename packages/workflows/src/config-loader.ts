@@ -1,9 +1,10 @@
 import { existsSync } from "node:fs";
-import { readdir, readFile } from "node:fs/promises";
+import { readdir, readFile, realpath } from "node:fs/promises";
 import { homedir } from "node:os";
-import { basename, extname, join, resolve } from "node:path";
+import { basename, extname, join, relative, resolve } from "node:path";
 import { Type } from "typebox";
 import { Value } from "typebox/value";
+import { relativePathEscapesRoot } from "./utils";
 import type {
 	LoadedConfig,
 	WorkflowCommand,
@@ -352,25 +353,50 @@ async function loadCommands(dir: string): Promise<WorkflowCommand[]> {
 	return commands;
 }
 
+async function projectLocalDirInsideCwd(
+	cwd: string,
+	dir: string,
+	kind: string,
+	diagnostics: string[],
+): Promise<boolean> {
+	if (!existsSync(dir)) return true;
+	const [realCwd, realDir] = await Promise.all([realpath(cwd), realpath(dir)]);
+	const relativePath = relative(realCwd, realDir);
+	if (!relativePathEscapesRoot(relativePath)) return true;
+	diagnostics.push(
+		`${dir}: skipped project-local ${kind} directory because its real path is outside workflow cwd`,
+	);
+	return false;
+}
+
 export async function loadWorkflowConfig(
 	cwd: string,
 	extensionRoot: string,
 ): Promise<LoadedConfig> {
 	const diagnostics: string[] = [];
 	const workflowDirs = [
-		join(extensionRoot, "workflows", "defaults"),
-		join(homedir(), ".pi", "agent", "workflows"),
-		resolve(cwd, ".pi", "workflows"),
+		{ path: join(extensionRoot, "workflows", "defaults"), projectLocal: false },
+		{ path: join(homedir(), ".pi", "agent", "workflows"), projectLocal: false },
+		{ path: resolve(cwd, ".pi", "workflows"), projectLocal: true },
 	];
 	const commandDirs = [
-		join(extensionRoot, "commands", "defaults"),
-		join(homedir(), ".pi", "agent", "workflow-commands"),
-		resolve(cwd, ".pi", "workflow-commands"),
+		{ path: join(extensionRoot, "commands", "defaults"), projectLocal: false },
+		{
+			path: join(homedir(), ".pi", "agent", "workflow-commands"),
+			projectLocal: false,
+		},
+		{ path: resolve(cwd, ".pi", "workflow-commands"), projectLocal: true },
 	];
 
 	const workflowsByName = new Map<string, WorkflowDefinition>();
 	for (const dir of workflowDirs) {
-		const files = await listFiles(dir, new Set([".yaml", ".yml"]));
+		if (
+			dir.projectLocal &&
+			!(await projectLocalDirInsideCwd(cwd, dir.path, "workflow", diagnostics))
+		) {
+			continue;
+		}
+		const files = await listFiles(dir.path, new Set([".yaml", ".yml"]));
 		for (const file of files) {
 			try {
 				const workflow = validateWorkflow(await loadYamlFile(file), file);
@@ -385,7 +411,13 @@ export async function loadWorkflowConfig(
 
 	const commandsByName = new Map<string, WorkflowCommand>();
 	for (const dir of commandDirs) {
-		for (const command of await loadCommands(dir))
+		if (
+			dir.projectLocal &&
+			!(await projectLocalDirInsideCwd(cwd, dir.path, "command", diagnostics))
+		) {
+			continue;
+		}
+		for (const command of await loadCommands(dir.path))
 			commandsByName.set(command.name, command);
 	}
 

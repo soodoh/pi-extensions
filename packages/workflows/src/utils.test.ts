@@ -70,6 +70,7 @@ describe("workflow utils", () => {
 		expect(ensureInsideCwd("/repo", "plans/plan.md")).toBe(
 			"/repo/plans/plan.md",
 		);
+		expect(ensureInsideCwd("/repo", "..plan.md")).toBe("/repo/..plan.md");
 	});
 
 	test("ensureRealPathInsideCwd rejects symlinks that escape cwd", async () => {
@@ -92,6 +93,16 @@ describe("workflow utils", () => {
 
 		await expect(ensureRealPathInsideCwd(root, "linked-plan.md")).resolves.toBe(
 			await realpath(realPlan),
+		);
+	});
+
+	test("ensureRealPathInsideCwd allows filenames that begin with dot-dot", async () => {
+		const root = await tempDir("pi-workflows-root");
+		const plan = join(root, "..plan.md");
+		await writeFile(plan, "# Plan\n", "utf8");
+
+		await expect(ensureRealPathInsideCwd(root, "..plan.md")).resolves.toBe(
+			await realpath(plan),
 		);
 	});
 

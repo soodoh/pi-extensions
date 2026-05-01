@@ -1022,7 +1022,11 @@ export class PiModelClient implements ModelClient {
 		const clean = value.replace(/^@/, "");
 		const absolute = path.resolve(this.cwd, clean);
 		const relativePath = path.relative(this.cwd, absolute);
-		if (relativePath.startsWith("..") || path.isAbsolute(relativePath)) {
+		if (
+			relativePath === ".." ||
+			relativePath.startsWith(`..${path.sep}`) ||
+			path.isAbsolute(relativePath)
+		) {
 			throw new Error(`Path escapes repository root: ${value}`);
 		}
 		const [realRoot, realAbsolute] = await Promise.all([
@@ -1031,7 +1035,8 @@ export class PiModelClient implements ModelClient {
 		]);
 		const realRelativePath = path.relative(realRoot, realAbsolute);
 		if (
-			realRelativePath.startsWith("..") ||
+			realRelativePath === ".." ||
+			realRelativePath.startsWith(`..${path.sep}`) ||
 			path.isAbsolute(realRelativePath)
 		) {
 			throw new Error(`Path escapes repository root: ${value}`);

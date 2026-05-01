@@ -1,11 +1,12 @@
 import { existsSync } from "node:fs";
-import { readFile, realpath } from "node:fs/promises";
+import { readFile, realpath, stat } from "node:fs/promises";
 import { basename, join, relative, resolve } from "node:path";
 import { loadWorkflowConfig } from "./config-loader";
 import { applyModelPolicy } from "./model-policy";
 import { reviewPlanWithPlannotator } from "./plannotator";
 import { getRun, saveRun } from "./store";
 import {
+	ensureInsideCwd,
 	ensureRealPathInsideCwd,
 	extensionDir,
 	makeRunId,
@@ -23,11 +24,51 @@ import type {
 
 type MaybePromise<T> = T | Promise<T>;
 
+const MAX_PLAN_MARKDOWN_BYTES = 1024 * 1024;
+
 async function relativeToRealCwd(
 	cwd: string,
 	fullPath: string,
 ): Promise<string> {
 	return relative(await realpath(cwd), fullPath);
+}
+
+function planPathValidationMessage(filePath: string): string {
+	return `Plan must be an existing markdown file inside workflow cwd: ${filePath}`;
+}
+
+async function resolveExistingPlanMarkdownPath(
+	cwd: string,
+	filePath: string,
+): Promise<string> {
+	const lexicalFull = ensureInsideCwd(cwd, filePath);
+	if (!existsSync(lexicalFull) || !/\.mdx?$/i.test(lexicalFull)) {
+		throw new Error(planPathValidationMessage(filePath));
+	}
+	return ensureRealPathInsideCwd(cwd, filePath);
+}
+
+function assertPlanContentWithinLimit(content: string, label: string): void {
+	const size = Buffer.byteLength(content, "utf8");
+	if (size > MAX_PLAN_MARKDOWN_BYTES) {
+		throw new Error(
+			`Plan markdown is too large (${size} bytes; max ${MAX_PLAN_MARKDOWN_BYTES} bytes): ${label}`,
+		);
+	}
+}
+
+async function readBoundedPlanMarkdown(
+	fullPath: string,
+	label: string,
+): Promise<string> {
+	const metadata = await stat(fullPath);
+	if (!metadata.isFile()) throw new Error(planPathValidationMessage(label));
+	if (metadata.size > MAX_PLAN_MARKDOWN_BYTES) {
+		throw new Error(
+			`Plan markdown file is too large (${metadata.size} bytes; max ${MAX_PLAN_MARKDOWN_BYTES} bytes): ${label}`,
+		);
+	}
+	return readFile(fullPath, "utf8");
 }
 
 type WorkflowSessionManager = {
@@ -63,6 +104,7 @@ type WorkflowPiApi = Parameters<typeof applyModelPolicy>[0] & {
 
 export class WorkflowRunner {
 	private configCache: LoadedConfig | undefined;
+	private readonly continueExecutionLocks = new Map<string, Promise<void>>();
 	private pi: WorkflowPiApi;
 	private importMetaUrl: string;
 	constructor(pi: WorkflowPiApi, importMetaUrl: string) {
@@ -180,12 +222,9 @@ export class WorkflowRunner {
 		args: string,
 		ctx: WorkflowContext,
 	): Promise<WorkflowRunRecord> {
-		const full = await ensureRealPathInsideCwd(run.cwd, args.trim());
-		if (!existsSync(full) || !/\.mdx?$/i.test(full))
-			throw new Error(
-				`Plan must be an existing markdown file inside workflow cwd: ${args}`,
-			);
-		const content = await readFile(full, "utf8");
+		const planPath = args.trim();
+		const full = await resolveExistingPlanMarkdownPath(run.cwd, planPath);
+		const content = await readBoundedPlanMarkdown(full, planPath);
 		run.planPath = await relativeToRealCwd(run.cwd, full);
 		run.planContentHash = sha256(content);
 		run.approvedPlanContent = content;
@@ -293,12 +332,8 @@ export class WorkflowRunner {
 			throw new Error(
 				`Workflow run ${runId} is ${run.phase}; plan artifacts can only be submitted or approved while the run is ${allowedPhases.join(" or ")}.`,
 			);
-		const full = await ensureRealPathInsideCwd(run.cwd, filePath);
-		if (!existsSync(full) || !/\.mdx?$/i.test(full))
-			throw new Error(
-				`Plan must be an existing markdown file inside workflow cwd: ${filePath}`,
-			);
-		const planContent = await readFile(full, "utf8");
+		const full = await resolveExistingPlanMarkdownPath(run.cwd, filePath);
+		const planContent = await readBoundedPlanMarkdown(full, filePath);
 		return {
 			run,
 			full,
@@ -308,6 +343,25 @@ export class WorkflowRunner {
 		};
 	}
 	async continueExecution(runId: string, ctx: WorkflowContext): Promise<void> {
+		const previous =
+			this.continueExecutionLocks.get(runId) ?? Promise.resolve();
+		const current = (async () => {
+			await previous.catch(() => undefined);
+			await this.continueExecutionLocked(runId, ctx);
+		})();
+		this.continueExecutionLocks.set(runId, current);
+		try {
+			await current;
+		} finally {
+			if (this.continueExecutionLocks.get(runId) === current) {
+				this.continueExecutionLocks.delete(runId);
+			}
+		}
+	}
+	private async continueExecutionLocked(
+		runId: string,
+		ctx: WorkflowContext,
+	): Promise<void> {
 		const run = await getRun(runId);
 		if (!run) throw new Error(`Unknown workflow run: ${runId}`);
 		if (run.phase === "executing") {
@@ -321,7 +375,7 @@ export class WorkflowRunner {
 				`Workflow run ${runId} is ${run.phase}; approve the plan before executing.`,
 			);
 		if (!run.planPath) throw new Error(`Workflow run ${runId} has no planPath`);
-		const full = await ensureRealPathInsideCwd(run.cwd, run.planPath);
+		const full = await resolveExistingPlanMarkdownPath(run.cwd, run.planPath);
 		const content = await this.approvedPlanContent(run, full);
 		if (!run.planContentHash) run.planContentHash = sha256(content);
 		const workflow = await this.findWorkflow(run.cwd, run.workflowName);
@@ -398,13 +452,18 @@ export class WorkflowRunner {
 	): Promise<string> {
 		if (!existsSync(full))
 			throw new Error(`Approved plan file no longer exists: ${run.planPath}`);
-		const currentContent = await readFile(full, "utf8");
+		const currentContent = await readBoundedPlanMarkdown(
+			full,
+			run.planPath ?? full,
+		);
 		const currentHash = sha256(currentContent);
 		if (run.planContentHash && currentHash !== run.planContentHash)
 			throw new Error(
 				`Approved plan changed after approval: ${run.planPath}. Re-submit the plan for review before executing.`,
 			);
-		return run.approvedPlanContent ?? currentContent;
+		const content = run.approvedPlanContent ?? currentContent;
+		assertPlanContentWithinLimit(content, run.planPath ?? full);
+		return content;
 	}
 	private async executionKickoff(
 		workflow: WorkflowDefinition,

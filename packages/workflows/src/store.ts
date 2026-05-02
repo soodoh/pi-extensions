@@ -130,9 +130,12 @@ async function removeStaleRunLock(lockPath: string): Promise<boolean> {
 	}
 
 	const pid = parseLockPid(raw);
-	const deadProcess = pid !== undefined && !isProcessAlive(pid);
 	const tooOld = lockAgeMs > RUN_LOCK_STALE_MS;
-	if (!deadProcess && !tooOld) return false;
+	if (pid !== undefined) {
+		if (isProcessAlive(pid)) return false;
+	} else if (!tooOld) {
+		return false;
+	}
 
 	try {
 		await rm(lockPath, { force: true });

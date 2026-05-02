@@ -1,6 +1,7 @@
 import type {
 	AuthCredentialLike,
 	ModelLike,
+	ModelRegistryLike,
 	ProviderUsageContext,
 } from "./pi-types";
 
@@ -71,7 +72,17 @@ const PROVIDER_FAMILY_ORDER = [
 	"google-antigravity",
 ];
 
+type AvailableModelsCacheEntry = {
+	models?: ModelLike[];
+	pending?: Promise<void>;
+	callbacks: Set<() => void>;
+};
+
 const providerUsageCache = new Map<string, ProviderUsageCacheEntry>();
+let availableModelsCache = new WeakMap<
+	ModelRegistryLike,
+	AvailableModelsCacheEntry
+>();
 let providerUsageInvalidation = 0;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -161,12 +172,49 @@ function modelAuthKind(
 		: undefined;
 }
 
-function getConfiguredModels(ctx: ProviderUsageContext): ModelLike[] {
-	const available = ctx.modelRegistry?.getAvailable?.();
-	if (Array.isArray(available)) return available;
+function getConfiguredModels(
+	ctx: ProviderUsageContext,
+	onUpdate?: () => void,
+): ModelLike[] {
+	const registry = ctx.modelRegistry;
+	if (!registry) return [];
 
-	const allModels = ctx.modelRegistry?.getAll?.() ?? [];
-	const hasConfiguredAuth = ctx.modelRegistry?.hasConfiguredAuth;
+	const cached = availableModelsCache.get(registry);
+	if (cached?.models) return cached.models;
+	if (cached?.pending) {
+		if (onUpdate) cached.callbacks.add(onUpdate);
+		return [];
+	}
+
+	const available = registry.getAvailable?.();
+	if (Array.isArray(available)) {
+		availableModelsCache.set(registry, {
+			models: available,
+			callbacks: new Set(),
+		});
+		return available;
+	}
+	if (available) {
+		const entry: AvailableModelsCacheEntry = { callbacks: new Set() };
+		if (onUpdate) entry.callbacks.add(onUpdate);
+		entry.pending = available
+			.then((models) => {
+				entry.models = Array.isArray(models) ? models : [];
+			})
+			.catch(() => {
+				availableModelsCache.delete(registry);
+			})
+			.finally(() => {
+				entry.pending = undefined;
+				for (const callback of entry.callbacks) callback();
+				entry.callbacks.clear();
+			});
+		availableModelsCache.set(registry, entry);
+		return [];
+	}
+
+	const allModels = registry.getAll?.() ?? [];
+	const hasConfiguredAuth = registry.hasConfiguredAuth;
 	return hasConfiguredAuth
 		? allModels.filter((model) => hasConfiguredAuth(model))
 		: [];
@@ -332,11 +380,18 @@ function getStoredOAuthCredential(
 	return credential?.type === "oauth" ? credential : undefined;
 }
 
+async function getOAuthProviderToken(
+	ctx: ProviderUsageContext,
+	providerId: string,
+): Promise<string | undefined> {
+	const credential = getStoredOAuthCredential(ctx, providerId);
+	return credential?.access ?? (await getProviderToken(ctx, providerId));
+}
+
 async function getGitHubCopilotUserToken(
 	ctx: ProviderUsageContext,
 ): Promise<string | undefined> {
-	const credential = getStoredOAuthCredential(ctx, "github-copilot");
-	return credential?.access ?? (await getProviderToken(ctx, "github-copilot"));
+	return getOAuthProviderToken(ctx, "github-copilot");
 }
 
 function numericField(value: unknown): number | undefined {
@@ -644,7 +699,7 @@ async function fetchProviderUsage(
 				? await fetchGitHubCopilotUsage(githubToken)
 				: undefined;
 		} else {
-			const token = await getProviderToken(ctx, target.providerId);
+			const token = await getOAuthProviderToken(ctx, target.providerId);
 			if (!token) return { ...statusBase, state: "unknown" };
 
 			if (target.providerId === "anthropic") {
@@ -687,6 +742,10 @@ async function fetchProviderUsage(
 export function invalidateProviderUsageCache(): void {
 	providerUsageInvalidation++;
 	providerUsageCache.clear();
+	availableModelsCache = new WeakMap<
+		ModelRegistryLike,
+		AvailableModelsCacheEntry
+	>();
 }
 
 export function refreshProviderUsage(
@@ -694,6 +753,7 @@ export function refreshProviderUsage(
 	targets: ProviderUsageTarget[],
 	onUpdate: () => void,
 ): void {
+	getConfiguredModels(ctx, onUpdate);
 	const now = Date.now();
 	const fetchId = providerUsageInvalidation;
 	for (const target of targets) {

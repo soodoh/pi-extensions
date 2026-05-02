@@ -438,6 +438,9 @@ async function loadCommands(
 		try {
 			const raw = await readTextFileWithinLimit(file);
 			const parsed = parseCommandFrontmatter(raw);
+			if (parsed.body.trim().length === 0) {
+				throw new Error("command body must be non-empty after frontmatter");
+			}
 			commands.push({
 				name: basename(file, ".md"),
 				description: parsed.data.description,

@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, stat, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, test, vi } from "vitest";
@@ -31,6 +31,8 @@ function runRecord(id: string, updatedAt: string): WorkflowRunRecord {
 }
 
 afterEach(async () => {
+	vi.useRealTimers();
+	vi.restoreAllMocks();
 	vi.doUnmock("node:os");
 	vi.resetModules();
 	await Promise.all(
@@ -126,6 +128,27 @@ describe("workflow run store", () => {
 
 		expect(ran).toBe(true);
 		await expect(stat(lockPath)).rejects.toMatchObject({ code: "ENOENT" });
+	});
+
+	test("does not remove an old lock owned by a live process before timing out", async () => {
+		const home = await tempHome("pi-workflows-store-live-lock-home");
+		const { withRunLock, workflowRunStorePath } =
+			await importStoreWithHome(home);
+		await mkdir(workflowRunStorePath, { recursive: true });
+		const lockPath = join(workflowRunStorePath, "pwf-77777777.continue.lock");
+		await writeFile(lockPath, `${process.pid}\n`, "utf8");
+		const oldLockTime = new Date(0);
+		await utimes(lockPath, oldLockTime, oldLockTime);
+		vi.spyOn(Date, "now").mockReturnValueOnce(600_000).mockReturnValue(630_001);
+
+		await expect(
+			withRunLock("pwf-77777777", "continue", async () => {
+				throw new Error("lock callback should not run");
+			}),
+		).rejects.toThrow(
+			/Timed out waiting for workflow run lock.*remove this lock file manually/,
+		);
+		await expect(stat(lockPath)).resolves.toBeDefined();
 	});
 
 	test("rejects traversal run ids before reading or writing paths", async () => {

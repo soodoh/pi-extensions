@@ -45,6 +45,32 @@ describe("workflow config loader", () => {
 			"plan-execute",
 		]);
 		expect(config.commands.length).toBeGreaterThan(0);
+		expect(
+			config.commands.every((command) => command.content.trim().length > 0),
+		).toBe(true);
+	});
+
+	test("rejects command files with empty bodies after frontmatter", async () => {
+		const home = await tempDir("pi-workflows-empty-command-home");
+		const cwd = await tempDir("pi-workflows-empty-command-cwd");
+		const extensionRoot = await tempDir("pi-workflows-empty-command-ext");
+		const commandDir = join(extensionRoot, "commands", "defaults");
+		await mkdir(commandDir, { recursive: true });
+		await writeFile(
+			join(commandDir, "empty.md"),
+			"---\ndescription: Empty command\n---\n   \n\t\n",
+			"utf8",
+		);
+
+		const { loadWorkflowConfig } = await importConfigLoaderWithHome(home);
+		const config = await loadWorkflowConfig(cwd, extensionRoot);
+
+		expect(config.commands).toEqual([]);
+		expect(config.diagnostics).toHaveLength(1);
+		expect(config.diagnostics[0]).toContain("empty.md");
+		expect(config.diagnostics[0]).toContain(
+			"command body must be non-empty after frontmatter",
+		);
 	});
 
 	test("drops workflows with missing command references and reports diagnostics", async () => {

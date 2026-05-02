@@ -78,6 +78,48 @@ nodes:
 		);
 	});
 
+	test("drops workflows with missing loop command references and reports diagnostics", async () => {
+		const home = await tempDir("pi-workflows-missing-loop-command-home");
+		const cwd = await tempDir("pi-workflows-missing-loop-command-cwd");
+		const extensionRoot = await tempDir(
+			"pi-workflows-missing-loop-command-extension",
+		);
+		const workflowDir = join(extensionRoot, "workflows", "defaults");
+		const commandDir = join(extensionRoot, "commands", "defaults");
+		await mkdir(workflowDir, { recursive: true });
+		await mkdir(commandDir, { recursive: true });
+		await writeFile(
+			join(commandDir, "known.md"),
+			"Run known command\n",
+			"utf8",
+		);
+		await writeFile(
+			join(workflowDir, "bad-loop.yaml"),
+			`name: bad-loop-workflow
+
+description: Missing loop command workflow
+
+nodes:
+  - id: run
+    command: known
+    loop:
+      command: does-not-exist
+      until: done
+      max_iterations: 2
+`,
+			"utf8",
+		);
+
+		const { loadWorkflowConfig } = await importConfigLoaderWithHome(home);
+		const config = await loadWorkflowConfig(cwd, extensionRoot);
+
+		expect(config.workflows).toEqual([]);
+		expect(config.diagnostics).toHaveLength(1);
+		expect(config.diagnostics[0]).toContain(
+			"node run.loop references unknown command does-not-exist",
+		);
+	});
+
 	test("drops workflows with empty node body strings and reports diagnostics", async () => {
 		const home = await tempDir("pi-workflows-empty-node-body-home");
 		const cwd = await tempDir("pi-workflows-empty-node-body-cwd");

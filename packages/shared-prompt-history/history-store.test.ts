@@ -87,6 +87,25 @@ describe("shared prompt history store", () => {
 		]);
 	});
 
+	test("suppresses duplicates when multiple editor states supply stale previous prompts", async () => {
+		const dir = await makeTempDir();
+		const historyPath = join(dir, "prompt-history.jsonl");
+		await appendPrompt("old", historyPath);
+
+		const staleEditorState = { lastPersistedPrompt: "old" };
+		await expect(
+			appendPrompt("same", historyPath, staleEditorState),
+		).resolves.toBe(true);
+		await expect(
+			appendPrompt("same", historyPath, staleEditorState),
+		).resolves.toBe(false);
+
+		await expect(readPromptHistory(historyPath)).resolves.toEqual([
+			"old",
+			"same",
+		]);
+	});
+
 	test("ignores malformed JSONL records while reading", async () => {
 		const dir = await makeTempDir();
 		const historyPath = join(dir, "prompt-history.jsonl");

@@ -18,7 +18,6 @@ import {
 	LEGACY_USAGE_CUSTOM_TYPE,
 	type PersistedInteractionState,
 	type SuggestionUsageStatsPair,
-	type UsageLedgerEntry,
 } from "./session-state-types";
 
 export function emptyUsagePair(): SuggestionUsageStatsPair {
@@ -204,11 +203,11 @@ export function extractUsageTotals(entries: SessionEntry[]): {
 		)
 			continue;
 		legacyUsageEntryCount += 1;
-		const data = entry.data as UsageLedgerEntry;
+		const data = isObjectRecord(entry.data) ? entry.data : undefined;
 		const usage = parseUsage(data?.usage);
 		if (!usage) continue;
 		hasLedger = true;
-		if (data.kind === "seeder") seeder = addUsageStats(seeder, usage);
+		if (data?.kind === "seeder") seeder = addUsageStats(seeder, usage);
 		else suggester = addUsageStats(suggester, usage);
 	}
 

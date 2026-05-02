@@ -25,6 +25,31 @@ function createRunId(): string {
 	return `seed-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
+function errorMessage(error: unknown): string {
+	return error instanceof Error ? error.message : String(error);
+}
+
+function isRecord(value: unknown): value is Record<PropertyKey, unknown> {
+	return typeof value === "object" && value !== null;
+}
+
+function isSuggestionUsage(value: unknown): value is SuggestionUsage {
+	return (
+		isRecord(value) &&
+		typeof value.inputTokens === "number" &&
+		typeof value.outputTokens === "number" &&
+		typeof value.cacheReadTokens === "number" &&
+		typeof value.cacheWriteTokens === "number" &&
+		typeof value.totalTokens === "number" &&
+		typeof value.costTotal === "number"
+	);
+}
+
+function usageFromError(error: unknown): SuggestionUsage | undefined {
+	if (!isRecord(error) || !isSuggestionUsage(error.usage)) return undefined;
+	return normalizeSuggestionUsage(error.usage);
+}
+
 interface ReseedRunnerDeps {
 	config: PromptSuggesterConfig;
 	seedStore: SeedStore;
@@ -67,7 +92,7 @@ export class ReseedRunner {
 			})
 			.catch((error) => {
 				this.deps.logger.error("reseed.queue.failed", {
-					error: (error as Error).message,
+					error: errorMessage(error),
 				});
 			})
 			.finally(() => {
@@ -126,7 +151,7 @@ export class ReseedRunner {
 				const meta = {
 					runId,
 					reason: current.reason,
-					error: (error as Error).message,
+					error: errorMessage(error),
 					tokens: usage?.totalTokens,
 					cost: usage?.costTotal,
 					consecutiveFailures: this.consecutiveFailureCount,
@@ -153,20 +178,7 @@ export class ReseedRunner {
 	}
 
 	private extractUsageFromError(error: unknown): SuggestionUsage | undefined {
-		if (!error || typeof error !== "object") return undefined;
-		const usage = (error as { usage?: SuggestionUsage }).usage;
-		if (!usage) return undefined;
-		if (
-			typeof usage.inputTokens !== "number" ||
-			typeof usage.outputTokens !== "number" ||
-			typeof usage.cacheReadTokens !== "number" ||
-			typeof usage.cacheWriteTokens !== "number" ||
-			typeof usage.totalTokens !== "number" ||
-			typeof usage.costTotal !== "number"
-		) {
-			return undefined;
-		}
-		return normalizeSuggestionUsage(usage);
+		return usageFromError(error);
 	}
 
 	public isRunning(): boolean {

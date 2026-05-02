@@ -142,7 +142,12 @@ export default function sharedPromptHistory(
 	pi.on("session_start", async (_event, ctx) => {
 		const historyPath =
 			options.historyPath ?? getPromptHistoryPath({ home: options.home });
-		const history = await readPromptHistory(historyPath);
+		let history: string[] = [];
+		try {
+			history = await readPromptHistory(historyPath);
+		} catch {
+			// Shared history should never prevent editor installation.
+		}
 
 		const originalSetEditorComponent = ctx.ui.setEditorComponent.bind(ctx.ui);
 		ctx.ui.setEditorComponent = (factory) => {

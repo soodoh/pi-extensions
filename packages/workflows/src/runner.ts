@@ -25,6 +25,12 @@ import type {
 
 type MaybePromise<T> = T | Promise<T>;
 
+type ExistingPlanArtifact = {
+	planPath: string;
+	planContent: string;
+	planContentHash: string;
+};
+
 const MAX_PLAN_MARKDOWN_BYTES = 1024 * 1024;
 
 async function relativeToRealCwd(
@@ -158,6 +164,10 @@ export class WorkflowRunner {
 	): Promise<WorkflowRunRecord> {
 		const workflow = await this.findWorkflow(ctx.cwd, name);
 		if (!workflow) throw new Error(`Unknown workflow: ${name}`);
+		const existingPlan =
+			name === "execute-plan"
+				? await this.loadExistingPlanArtifact(ctx.cwd, args)
+				: undefined;
 		const run: WorkflowRunRecord = {
 			id: makeRunId(),
 			workflowName: name,
@@ -175,7 +185,7 @@ export class WorkflowRunner {
 			phase: run.phase,
 		});
 
-		if (name === "execute-plan") return this.startExistingPlan(run, args, ctx);
+		if (existingPlan) return this.startExistingPlan(run, existingPlan, ctx);
 		return this.startPlanning(run, workflow, args, ctx);
 	}
 	private async startPlanning(
@@ -249,17 +259,27 @@ export class WorkflowRunner {
 		await saveRun(run);
 		return run;
 	}
+	private async loadExistingPlanArtifact(
+		cwd: string,
+		args: string,
+	): Promise<ExistingPlanArtifact> {
+		const planPath = args.trim();
+		const full = await resolveExistingPlanMarkdownPath(cwd, planPath);
+		const planContent = await readBoundedPlanMarkdown(full, planPath);
+		return {
+			planPath: await relativeToRealCwd(cwd, full),
+			planContent,
+			planContentHash: sha256(planContent),
+		};
+	}
 	private async startExistingPlan(
 		run: WorkflowRunRecord,
-		args: string,
+		artifact: ExistingPlanArtifact,
 		ctx: WorkflowContext,
 	): Promise<WorkflowRunRecord> {
-		const planPath = args.trim();
-		const full = await resolveExistingPlanMarkdownPath(run.cwd, planPath);
-		const content = await readBoundedPlanMarkdown(full, planPath);
-		run.planPath = await relativeToRealCwd(run.cwd, full);
-		run.planContentHash = sha256(content);
-		run.approvedPlanContent = content;
+		run.planPath = artifact.planPath;
+		run.planContentHash = artifact.planContentHash;
+		run.approvedPlanContent = artifact.planContent;
 		run.phase = "approved";
 		run.logs.push(`${nowIso()} loaded existing plan ${run.planPath}`);
 		await saveRun(run);

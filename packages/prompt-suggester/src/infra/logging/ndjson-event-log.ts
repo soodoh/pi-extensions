@@ -17,17 +17,19 @@ function truncate(value: string, maxChars: number): string {
 	return `${value.slice(0, maxChars)}…`;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null;
+}
+
 function sanitizeValue(value: unknown, maxValueChars: number): unknown {
 	if (value === null || value === undefined) return value;
 	if (typeof value === "string") return truncate(value, maxValueChars);
 	if (typeof value === "number" || typeof value === "boolean") return value;
 	if (Array.isArray(value))
 		return value.slice(0, 40).map((item) => sanitizeValue(item, maxValueChars));
-	if (typeof value === "object") {
+	if (isRecord(value)) {
 		const out: Record<string, unknown> = {};
-		for (const [key, nested] of Object.entries(
-			value as Record<string, unknown>,
-		).slice(0, 40)) {
+		for (const [key, nested] of Object.entries(value).slice(0, 40)) {
 			out[key] = sanitizeValue(nested, maxValueChars);
 		}
 		return out;
@@ -59,10 +61,7 @@ export class NdjsonEventLog implements EventLog {
 					: undefined;
 				const payload: LoggedEvent = {
 					...event,
-					meta:
-						sanitizedMeta && typeof sanitizedMeta === "object"
-							? Object.fromEntries(Object.entries(sanitizedMeta))
-							: undefined,
+					meta: isRecord(sanitizedMeta) ? sanitizedMeta : undefined,
 				};
 				await appendPrivateFile(this.filePath, `${JSON.stringify(payload)}\n`);
 				await this.rotateIfNeeded();

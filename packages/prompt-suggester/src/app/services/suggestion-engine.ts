@@ -37,6 +37,10 @@ function stableSamplePercent(seed: string): number {
 	return hash % 100;
 }
 
+function errorMessage(error: unknown): string {
+	return error instanceof Error ? error.message : String(error);
+}
+
 interface GeneratedSuggestion {
 	text: string;
 	usage?: SuggestionUsage;
@@ -186,7 +190,7 @@ export class SuggestionEngine {
 					config,
 					{
 						requestedStrategy,
-						fallbackReason: `transcript_error:${(error as Error).message}`,
+						fallbackReason: `transcript_error:${errorMessage(error)}`,
 					},
 				);
 			}

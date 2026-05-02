@@ -85,6 +85,23 @@ describe("workflow run store", () => {
 		expect(fileMode).toBe(0o600);
 	});
 
+	test("removes a stale run lock before running a continuation", async () => {
+		const home = await tempHome("pi-workflows-store-stale-lock-home");
+		const { withRunLock, workflowRunStorePath } =
+			await importStoreWithHome(home);
+		await mkdir(workflowRunStorePath, { recursive: true });
+		const lockPath = join(workflowRunStorePath, "pwf-55555555.continue.lock");
+		await writeFile(lockPath, "999999999\n", "utf8");
+		let ran = false;
+
+		await withRunLock("pwf-55555555", "continue", async () => {
+			ran = true;
+		});
+
+		expect(ran).toBe(true);
+		await expect(stat(lockPath)).rejects.toMatchObject({ code: "ENOENT" });
+	});
+
 	test("rejects traversal run ids before reading or writing paths", async () => {
 		const home = await tempHome("pi-workflows-store-traversal-home");
 		const { getRun, saveRun } = await importStoreWithHome(home);

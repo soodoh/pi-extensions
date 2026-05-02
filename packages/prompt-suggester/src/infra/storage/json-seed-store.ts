@@ -3,6 +3,14 @@ import type { SeedStore } from "../../app/ports/seed-store";
 import { isSeedArtifact, type SeedArtifact } from "../../domain/seed";
 import { atomicWriteJson } from "./atomic-write";
 
+function isErrnoException(error: unknown): error is NodeJS.ErrnoException {
+	return error instanceof Error && "code" in error;
+}
+
+function errorMessage(error: unknown): string {
+	return error instanceof Error ? error.message : String(error);
+}
+
 export class JsonSeedStore implements SeedStore {
 	public constructor(private readonly filePath: string) {}
 
@@ -11,9 +19,9 @@ export class JsonSeedStore implements SeedStore {
 		try {
 			raw = await fs.readFile(this.filePath, "utf8");
 		} catch (error) {
-			if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+			if (isErrnoException(error) && error.code === "ENOENT") return null;
 			throw new Error(
-				`Failed to read seed file ${this.filePath}: ${(error as Error).message}`,
+				`Failed to read seed file ${this.filePath}: ${errorMessage(error)}`,
 			);
 		}
 

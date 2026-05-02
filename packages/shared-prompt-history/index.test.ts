@@ -155,6 +155,23 @@ describe("shared prompt history extension", () => {
 		}
 	});
 
+	test("installs the editor when history cannot be read", async () => {
+		const tempHistory = await createTempHistory();
+		try {
+			await mkdir(tempHistory.historyPath, { recursive: true });
+
+			const editor = await createEditor(
+				tempHistory.historyPath,
+				async () => {},
+			);
+			await expect(
+				editor.onSubmit?.("submitted prompt"),
+			).resolves.toBeUndefined();
+		} finally {
+			await rm(tempHistory.home, { recursive: true, force: true });
+		}
+	});
+
 	test("loads shared history into editor components registered by later extensions", async () => {
 		const tempHistory = await createTempHistory();
 		try {

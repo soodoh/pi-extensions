@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { open, readdir, readFile, rm } from "node:fs/promises";
+import { open, readdir, readFile, rm, stat } from "node:fs/promises";
 import { basename, extname, join } from "node:path";
 import { Type } from "typebox";
 import { Value } from "typebox/value";
@@ -15,6 +15,8 @@ import type { WorkflowRunRecord } from "./workflow-types";
 const LEGACY_STORE_PATH = homePath(".pi", "agent", "workflow-runs.json");
 const RUNS_DIR = homePath(".pi", "agent", "workflow-runs");
 const RUN_LOCK_RETRY_MS = 10;
+const RUN_LOCK_MAX_WAIT_MS = 30_000;
+const RUN_LOCK_STALE_MS = 5 * 60_000;
 
 type StoreFile = { runs: WorkflowRunRecord[] };
 
@@ -70,6 +72,59 @@ function runLockPath(id: string, name: string): string {
 
 function isErrnoException(error: unknown): error is NodeJS.ErrnoException {
 	return error instanceof Error && "code" in error;
+}
+
+function errorMessage(error: unknown): string {
+	return error instanceof Error ? error.message : String(error);
+}
+
+function parseLockPid(raw: string): number | undefined {
+	const value = Number(raw.trim());
+	return Number.isSafeInteger(value) && value > 0 ? value : undefined;
+}
+
+function isProcessAlive(pid: number): boolean {
+	try {
+		process.kill(pid, 0);
+		return true;
+	} catch (error) {
+		if (isErrnoException(error) && error.code === "ESRCH") return false;
+		return true;
+	}
+}
+
+async function removeStaleRunLock(lockPath: string): Promise<boolean> {
+	let raw = "";
+	let lockAgeMs = 0;
+	try {
+		const [contents, metadata] = await Promise.all([
+			readFile(lockPath, "utf8"),
+			stat(lockPath),
+		]);
+		raw = contents;
+		lockAgeMs = Date.now() - metadata.mtimeMs;
+	} catch (error) {
+		if (isErrnoException(error) && error.code === "ENOENT") return true;
+		return false;
+	}
+
+	const pid = parseLockPid(raw);
+	const deadProcess = pid !== undefined && !isProcessAlive(pid);
+	const tooOld = lockAgeMs > RUN_LOCK_STALE_MS;
+	if (!deadProcess && !tooOld) return false;
+
+	try {
+		await rm(lockPath, { force: true });
+		return true;
+	} catch {
+		return false;
+	}
+}
+
+function runLockWaitError(lockPath: string, cause: unknown): Error {
+	return new Error(
+		`Timed out waiting for workflow run lock ${lockPath}: ${errorMessage(cause)}. If no workflow continuation is running, remove this lock file manually and retry.`,
+	);
 }
 
 function sleep(ms: number): Promise<void> {
@@ -158,14 +213,23 @@ export async function withRunLock<T>(
 	fn: () => Promise<T>,
 ): Promise<T> {
 	const lockPath = runLockPath(id, name);
+	const deadline = Date.now() + RUN_LOCK_MAX_WAIT_MS;
 	let handle: Awaited<ReturnType<typeof open>> | undefined;
+	let lastWaitCause: unknown = "lock is held by another process";
 	while (!handle) {
 		try {
 			handle = await open(lockPath, "wx", 0o600);
 			await handle.writeFile(`${process.pid}\n`, "utf8");
 		} catch (error) {
 			if (isErrnoException(error) && error.code === "EEXIST") {
-				await sleep(RUN_LOCK_RETRY_MS);
+				lastWaitCause = error;
+				if (await removeStaleRunLock(lockPath)) continue;
+				if (Date.now() >= deadline) {
+					throw runLockWaitError(lockPath, lastWaitCause);
+				}
+				await sleep(
+					Math.min(RUN_LOCK_RETRY_MS, Math.max(0, deadline - Date.now())),
+				);
 				continue;
 			}
 			throw error;

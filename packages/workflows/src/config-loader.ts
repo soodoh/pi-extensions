@@ -42,7 +42,7 @@ const modelPolicySchema = Type.Object(
 const workflowLoopSchema = Type.Object(
 	{
 		prompt: Type.Optional(Type.String()),
-		command: Type.Optional(Type.String()),
+		command: Type.Optional(nonEmptyStringSchema),
 		until: Type.String(),
 		max_iterations: Type.Integer({ minimum: 1 }),
 		fresh_context: Type.Optional(Type.Boolean()),
@@ -389,12 +389,20 @@ function validateWorkflowCommands(
 	workflow: WorkflowDefinition,
 	commandsByName: Map<string, WorkflowCommand>,
 ): string[] {
-	return workflow.nodes
-		.filter((node) => node.command && !commandsByName.has(node.command))
-		.map(
-			(node) =>
-				`node ${node.id} references unknown command ${node.command ?? ""}`,
-		);
+	return workflow.nodes.flatMap((node) => {
+		const diagnostics: string[] = [];
+		if (node.command && !commandsByName.has(node.command)) {
+			diagnostics.push(
+				`node ${node.id} references unknown command ${node.command}`,
+			);
+		}
+		if (node.loop?.command && !commandsByName.has(node.loop.command)) {
+			diagnostics.push(
+				`node ${node.id}.loop references unknown command ${node.loop.command}`,
+			);
+		}
+		return diagnostics;
+	});
 }
 
 function isSupportedWhenExpression(when: string): boolean {

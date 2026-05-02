@@ -322,6 +322,7 @@ nodes:
 		const home = await tempDir("pi-workflows-runner-missing-home");
 		const cwd = await tempDir("pi-workflows-runner-missing-cwd");
 		const { WorkflowRunner } = await importRunnerWithHome(home);
+		const { listRuns } = await import("../src/store");
 		const runner = new WorkflowRunner(
 			{
 				events: {
@@ -336,6 +337,7 @@ nodes:
 		await expect(
 			runner.startWorkflow("execute-plan", "missing-plan.md", workflowCtx(cwd)),
 		).rejects.toThrow(/Plan must be an existing markdown file/);
+		expect(await listRuns()).toEqual([]);
 	});
 
 	test("plan approval reports manual resume when follow-up delivery is unavailable", async () => {

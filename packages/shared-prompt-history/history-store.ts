@@ -152,15 +152,15 @@ export async function appendPrompt(
 	const trimmed = prompt.trim();
 	if (!trimmed) return false;
 
-	const knownLastPrompt =
-		options.lastPersistedPrompt ?? lastPersistedPromptByPath.get(historyPath);
-	if (knownLastPrompt === trimmed) return false;
-
-	if (knownLastPrompt === undefined) {
-		const lastPrompt = await readLastPrompt(historyPath);
-		if (lastPrompt) lastPersistedPromptByPath.set(historyPath, lastPrompt);
-		if (lastPrompt === trimmed) return false;
+	const cachedLastPrompt = lastPersistedPromptByPath.get(historyPath);
+	const suppliedLastPrompt = options.lastPersistedPrompt;
+	if (cachedLastPrompt === trimmed || suppliedLastPrompt === trimmed) {
+		return false;
 	}
+
+	const lastPrompt = await readLastPrompt(historyPath);
+	if (lastPrompt) lastPersistedPromptByPath.set(historyPath, lastPrompt);
+	if (lastPrompt === trimmed) return false;
 
 	await ensurePrivateDirectory(dirname(historyPath));
 	await appendFile(

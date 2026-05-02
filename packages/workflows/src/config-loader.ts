@@ -32,8 +32,8 @@ const MAX_DISCOVERY_FILES = 1000;
 const MAX_CONFIG_FILE_BYTES = 1024 * 1024;
 const modelPolicySchema = Type.Object(
 	{
-		model: Type.Optional(Type.String()),
-		models: Type.Optional(Type.Array(Type.String())),
+		model: Type.Optional(nonEmptyStringSchema),
+		models: Type.Optional(Type.Array(nonEmptyStringSchema, { minItems: 1 })),
 		autoSelectModel: Type.Optional(Type.Boolean()),
 		thinking: Type.Optional(thinkingLevelSchema),
 	},
@@ -88,9 +88,9 @@ const handoffSchema = Type.Object(
 );
 const subagentTaskSchema = Type.Object(
 	{
-		agent: Type.String(),
-		task: Type.String(),
-		model: Type.Optional(Type.String()),
+		agent: nonEmptyStringSchema,
+		task: nonEmptyStringSchema,
+		model: Type.Optional(nonEmptyStringSchema),
 		thinking: Type.Optional(thinkingLevelSchema),
 		output: Type.Optional(Type.Union([Type.String(), Type.Boolean()])),
 	},
@@ -98,9 +98,9 @@ const subagentTaskSchema = Type.Object(
 );
 const subagentSchema = Type.Object(
 	{
-		agent: Type.Optional(Type.String()),
-		task: Type.Optional(Type.String()),
-		tasks: Type.Optional(Type.Array(subagentTaskSchema)),
+		agent: Type.Optional(nonEmptyStringSchema),
+		task: Type.Optional(nonEmptyStringSchema),
+		tasks: Type.Optional(Type.Array(subagentTaskSchema, { minItems: 1 })),
 		context: Type.Optional(
 			Type.Union([Type.Literal("fresh"), Type.Literal("fork")]),
 		),
@@ -361,7 +361,28 @@ function validateNode(
 		throw new Error(
 			`node ${value.id} must define exactly one node type; got ${typeFields.join(", ") || "none"}`,
 		);
+	if (value.subagent) validateSubagent(value.id, value.subagent);
 	return value;
+}
+
+function validateSubagent(
+	nodeId: string,
+	subagent: NonNullable<WorkflowNode["subagent"]>,
+): void {
+	const hasTaskList = subagent.tasks !== undefined;
+	const hasSingleTaskFields =
+		subagent.agent !== undefined || subagent.task !== undefined;
+	if (hasTaskList && hasSingleTaskFields) {
+		throw new Error(
+			`node ${nodeId}.subagent must use either tasks or agent/task, not both`,
+		);
+	}
+	if (hasTaskList) return;
+	if (subagent.agent === undefined || subagent.task === undefined) {
+		throw new Error(
+			`node ${nodeId}.subagent must define either a non-empty tasks array or both non-empty agent and task`,
+		);
+	}
 }
 
 function validateWorkflowCommands(

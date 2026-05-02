@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -262,6 +262,60 @@ nodes:
 		expect(kickoff).toContain("output_artifact: result");
 		expect(kickoff).toContain("timeout: 30");
 		expect(kickoff).toContain('loop: {"until":"done","max_iterations":2}');
+	});
+
+	test("execute-plan rejects a symlinked plan whose target is not markdown", async () => {
+		const home = await tempDir("pi-workflows-runner-symlink-plan-home");
+		const cwd = await tempDir("pi-workflows-runner-symlink-plan-cwd");
+		await writeFile(join(cwd, "secret.txt"), "API_KEY=secret\n", "utf8");
+		await symlink("secret.txt", join(cwd, "plan.md"));
+		const { WorkflowRunner } = await importRunnerWithHome(home);
+		const runner = new WorkflowRunner(
+			{
+				events: {
+					emit: () => {},
+					on: () => undefined,
+				},
+				appendEntry: () => {},
+			},
+			pathToFileURL(new URL("../index.ts", import.meta.url).pathname).href,
+		);
+
+		await expect(
+			runner.startWorkflow("execute-plan", "plan.md", workflowCtx(cwd)),
+		).rejects.toThrow(/Plan must be an existing markdown file/);
+	});
+
+	test("plan artifact tools reject symlinked plans whose targets are not markdown", async () => {
+		const home = await tempDir("pi-workflows-runner-symlink-artifact-home");
+		const cwd = await tempDir("pi-workflows-runner-symlink-artifact-cwd");
+		await writeFile(join(cwd, "secret.txt"), "API_KEY=secret\n", "utf8");
+		await symlink("secret.txt", join(cwd, "plan.md"));
+		const { WorkflowRunner } = await importRunnerWithHome(home);
+		const { getRun, saveRun } = await import("../src/store");
+		const sessionFile = join(cwd, "planning-session.json");
+		await saveRun({
+			...runRecord("pwf-12121212", cwd, "planning"),
+			planningSessionPath: sessionFile,
+		});
+		const runner = new WorkflowRunner(
+			{
+				events: {
+					emit: () => {},
+					on: () => undefined,
+				},
+			},
+			pathToFileURL(new URL("../index.ts", import.meta.url).pathname).href,
+		);
+		const ctx = workflowCtx(cwd, sessionFile);
+
+		await expect(
+			runner.approvePlan("pwf-12121212", "plan.md", undefined, ctx),
+		).rejects.toThrow(/Plan must be an existing markdown file/);
+		await expect(
+			runner.submitPlan("pwf-12121212", "plan.md", ctx),
+		).rejects.toThrow(/Plan must be an existing markdown file/);
+		expect((await getRun("pwf-12121212"))?.phase).toBe("planning");
 	});
 
 	test("execute-plan rejects a missing plan path with validation error", async () => {
@@ -558,6 +612,75 @@ nodes:
 
 		expect(newSessionCalls).toBe(1);
 		expect((await getRun("pwf-88888888"))?.phase).toBe("executing");
+	});
+
+	test("continueExecution serializes concurrent calls across runner instances", async () => {
+		const home = await tempDir("pi-workflows-runner-cross-instance-home");
+		const cwd = await tempDir("pi-workflows-runner-cross-instance-cwd");
+		await writeFile(
+			join(cwd, "plan.md"),
+			"# Plan\n\n- [ ] Update one file\n",
+			"utf8",
+		);
+		const { WorkflowRunner } = await importRunnerWithHome(home);
+		const { getRun, saveRun } = await import("../src/store");
+		await saveRun({
+			...runRecord("pwf-12345678", cwd, "approved"),
+			planPath: "plan.md",
+		});
+		const pi = {
+			events: {
+				emit: () => {},
+				on: () => undefined,
+			},
+		};
+		const importMetaUrl = pathToFileURL(
+			new URL("../index.ts", import.meta.url).pathname,
+		).href;
+		const runnerA = new WorkflowRunner(pi, importMetaUrl);
+		const runnerB = new WorkflowRunner(pi, importMetaUrl);
+		let newSessionCalls = 0;
+		let releaseFirstSession: () => void = () => {};
+		const firstSessionBlocked = new Promise<void>((resolve) => {
+			releaseFirstSession = resolve;
+		});
+		const ctx: WorkflowContext = {
+			cwd,
+			async sendUserMessage() {},
+			async newSession(options) {
+				newSessionCalls += 1;
+				const sessionFile = join(
+					cwd,
+					`execution-session-${newSessionCalls}.json`,
+				);
+				await options.setup?.({
+					getSessionFile: () => sessionFile,
+					appendSessionInfo: () => {},
+					appendMessage: () => {},
+				});
+				await options.withSession({
+					...workflowCtx(cwd, sessionFile),
+				});
+				if (newSessionCalls === 1) await firstSessionBlocked;
+				return { cancelled: false };
+			},
+		};
+
+		const first = runnerA.continueExecution("pwf-12345678", ctx);
+		while (newSessionCalls === 0) {
+			await new Promise((resolve) => setTimeout(resolve, 0));
+		}
+		const second = runnerB.continueExecution("pwf-12345678", ctx);
+		await new Promise((resolve) => setTimeout(resolve, 20));
+		expect(newSessionCalls).toBe(1);
+		releaseFirstSession();
+		await Promise.all([first, second]);
+
+		expect(newSessionCalls).toBe(1);
+		expect((await getRun("pwf-12345678"))?.phase).toBe("executing");
+		expect((await getRun("pwf-12345678"))?.executionSessionPath).toContain(
+			"execution-session-1.json",
+		);
 	});
 
 	test("execution cancellation leaves approved runs approved without execution session state", async () => {

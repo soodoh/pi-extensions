@@ -12,6 +12,40 @@ interface SeederPromptInput {
 	}>;
 }
 
+function formatPreviousSeedSummary(previousSeed: SeedArtifact | null): string {
+	return previousSeed
+		? JSON.stringify(
+				{
+					projectIntentSummary: previousSeed.projectIntentSummary,
+					objectivesSummary: previousSeed.objectivesSummary,
+					constraintsSummary: previousSeed.constraintsSummary,
+					principlesGuidelinesSummary: previousSeed.principlesGuidelinesSummary,
+					implementationStatusSummary: previousSeed.implementationStatusSummary,
+					topObjectives: previousSeed.topObjectives,
+					constraints: previousSeed.constraints,
+					keyFiles: previousSeed.keyFiles.map((file) => ({
+						path: file.path,
+						category: file.category,
+						whyImportant: file.whyImportant,
+					})),
+					categoryFindings: previousSeed.categoryFindings,
+				},
+				null,
+				2,
+			)
+		: "none";
+}
+
+function formatSeederHistory(input: SeederPromptInput["history"]): string {
+	return input.length === 0
+		? "(none yet)"
+		: input
+				.map((entry, index) => {
+					return `Step ${index + 1} model response:\n${entry.modelResponse}\n\nStep ${index + 1} tool result:\n${entry.toolResult ?? "(none)"}`;
+				})
+				.join("\n\n");
+}
+
 export function renderSeederSystemPrompt(): string {
 	return `You are an agentic read-only repository seeder for pi-prompt-suggester.
 
@@ -73,38 +107,8 @@ Do not return type=final until you have explicitly investigated likely sources f
 }
 
 export function renderSeederUserPrompt(input: SeederPromptInput): string {
-	const previousSeedSummary = input.previousSeed
-		? JSON.stringify(
-				{
-					projectIntentSummary: input.previousSeed.projectIntentSummary,
-					objectivesSummary: input.previousSeed.objectivesSummary,
-					constraintsSummary: input.previousSeed.constraintsSummary,
-					principlesGuidelinesSummary:
-						input.previousSeed.principlesGuidelinesSummary,
-					implementationStatusSummary:
-						input.previousSeed.implementationStatusSummary,
-					topObjectives: input.previousSeed.topObjectives,
-					constraints: input.previousSeed.constraints,
-					keyFiles: input.previousSeed.keyFiles.map((file) => ({
-						path: file.path,
-						category: file.category,
-						whyImportant: file.whyImportant,
-					})),
-					categoryFindings: input.previousSeed.categoryFindings,
-				},
-				null,
-				2,
-			)
-		: "none";
-
-	const historyText =
-		input.history.length === 0
-			? "(none yet)"
-			: input.history
-					.map((entry, index) => {
-						return `Step ${index + 1} model response:\n${entry.modelResponse}\n\nStep ${index + 1} tool result:\n${entry.toolResult ?? "(none)"}`;
-					})
-					.join("\n\n");
+	const previousSeedSummary = formatPreviousSeedSummary(input.previousSeed);
+	const historyText = formatSeederHistory(input.history);
 
 	return `Repository root: ${input.cwd}
 Reseed reason: ${input.reseedTrigger.reason}
@@ -124,38 +128,8 @@ Decide the next best tool call, or return type=final only when enough evidence h
 export function renderForcedSeederFinalPrompt(
 	input: SeederPromptInput,
 ): string {
-	const previousSeedSummary = input.previousSeed
-		? JSON.stringify(
-				{
-					projectIntentSummary: input.previousSeed.projectIntentSummary,
-					objectivesSummary: input.previousSeed.objectivesSummary,
-					constraintsSummary: input.previousSeed.constraintsSummary,
-					principlesGuidelinesSummary:
-						input.previousSeed.principlesGuidelinesSummary,
-					implementationStatusSummary:
-						input.previousSeed.implementationStatusSummary,
-					topObjectives: input.previousSeed.topObjectives,
-					constraints: input.previousSeed.constraints,
-					keyFiles: input.previousSeed.keyFiles.map((file) => ({
-						path: file.path,
-						category: file.category,
-						whyImportant: file.whyImportant,
-					})),
-					categoryFindings: input.previousSeed.categoryFindings,
-				},
-				null,
-				2,
-			)
-		: "none";
-
-	const historyText =
-		input.history.length === 0
-			? "(none yet)"
-			: input.history
-					.map((entry, index) => {
-						return `Step ${index + 1} model response:\n${entry.modelResponse}\n\nStep ${index + 1} tool result:\n${entry.toolResult ?? "(none)"}`;
-					})
-					.join("\n\n");
+	const previousSeedSummary = formatPreviousSeedSummary(input.previousSeed);
+	const historyText = formatSeederHistory(input.history);
 
 	return `Repository root: ${input.cwd}
 Reseed reason: ${input.reseedTrigger.reason}

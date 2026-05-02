@@ -208,6 +208,139 @@ nodes:
 		expect(config.diagnostics.join("\n")).toContain("left -> right -> left");
 	});
 
+	test("drops workflows with invalid subagent payloads", async () => {
+		const home = await tempDir("pi-workflows-subagent-home");
+		const cwd = await tempDir("pi-workflows-subagent-cwd");
+		const extensionRoot = await tempDir("pi-workflows-subagent-extension");
+		const workflowDir = join(extensionRoot, "workflows", "defaults");
+		await mkdir(workflowDir, { recursive: true });
+		await writeFile(
+			join(workflowDir, "empty-subagent.yaml"),
+			`name: empty-subagent
+
+description: Empty subagent workflow
+
+nodes:
+  - id: run
+    subagent: {}
+`,
+			"utf8",
+		);
+		await writeFile(
+			join(workflowDir, "partial-subagent.yaml"),
+			`name: partial-subagent
+
+description: Partial subagent workflow
+
+nodes:
+  - id: run
+    subagent:
+      agent: reviewer
+`,
+			"utf8",
+		);
+		await writeFile(
+			join(workflowDir, "mixed-subagent.yaml"),
+			`name: mixed-subagent
+
+description: Mixed subagent workflow
+
+nodes:
+  - id: run
+    subagent:
+      agent: reviewer
+      task: review the diff
+      tasks:
+        - agent: worker
+          task: implement the task
+`,
+			"utf8",
+		);
+
+		const { loadWorkflowConfig } = await importConfigLoaderWithHome(home);
+		const config = await loadWorkflowConfig(cwd, extensionRoot);
+
+		expect(config.workflows).toEqual([]);
+		expect(config.diagnostics).toHaveLength(3);
+		expect(config.diagnostics.join("\n")).toContain(
+			"must define either a non-empty tasks array or both non-empty agent and task",
+		);
+		expect(config.diagnostics.join("\n")).toContain(
+			"must use either tasks or agent/task, not both",
+		);
+	});
+
+	test("drops workflows with empty modelPolicy selectors", async () => {
+		const home = await tempDir("pi-workflows-empty-policy-home");
+		const cwd = await tempDir("pi-workflows-empty-policy-cwd");
+		const extensionRoot = await tempDir("pi-workflows-empty-policy-extension");
+		const workflowDir = join(extensionRoot, "workflows", "defaults");
+		const commandDir = join(extensionRoot, "commands", "defaults");
+		await mkdir(workflowDir, { recursive: true });
+		await mkdir(commandDir, { recursive: true });
+		await writeFile(
+			join(commandDir, "known.md"),
+			"Run known command\n",
+			"utf8",
+		);
+		await writeFile(
+			join(workflowDir, "empty-model.yaml"),
+			`name: empty-model
+
+description: Empty model workflow
+
+modelPolicy:
+  default: { model: "" }
+
+nodes:
+  - id: run
+    command: known
+`,
+			"utf8",
+		);
+		await writeFile(
+			join(workflowDir, "empty-models.yaml"),
+			`name: empty-models
+
+description: Empty models workflow
+
+modelPolicy:
+  default: { models: [] }
+
+nodes:
+  - id: run
+    command: known
+`,
+			"utf8",
+		);
+		await writeFile(
+			join(workflowDir, "blank-model-entry.yaml"),
+			`name: blank-model-entry
+
+description: Blank model entry workflow
+
+modelPolicy:
+  default:
+    models: ["anthropic/claude", "  "]
+
+nodes:
+  - id: run
+    command: known
+`,
+			"utf8",
+		);
+
+		const { loadWorkflowConfig } = await importConfigLoaderWithHome(home);
+		const config = await loadWorkflowConfig(cwd, extensionRoot);
+
+		expect(config.workflows).toEqual([]);
+		expect(config.diagnostics).toHaveLength(3);
+		expect(config.diagnostics.join("\n")).toContain("empty-model.yaml");
+		expect(config.diagnostics.join("\n")).toContain("empty-models.yaml");
+		expect(config.diagnostics.join("\n")).toContain("blank-model-entry.yaml");
+		expect(config.diagnostics.join("\n")).toContain("workflow schema");
+	});
+
 	test("drops workflows with unsupported modelPolicy stages", async () => {
 		const home = await tempDir("pi-workflows-policy-home");
 		const cwd = await tempDir("pi-workflows-policy-cwd");

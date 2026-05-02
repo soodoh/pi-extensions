@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { readdir, readFile } from "node:fs/promises";
+import { open, readdir, readFile, rm } from "node:fs/promises";
 import { basename, extname, join } from "node:path";
 import { Type } from "typebox";
 import { Value } from "typebox/value";
@@ -14,6 +14,7 @@ import type { WorkflowRunRecord } from "./workflow-types";
 
 const LEGACY_STORE_PATH = homePath(".pi", "agent", "workflow-runs.json");
 const RUNS_DIR = homePath(".pi", "agent", "workflow-runs");
+const RUN_LOCK_RETRY_MS = 10;
 
 type StoreFile = { runs: WorkflowRunRecord[] };
 
@@ -61,6 +62,18 @@ function isWorkflowRunRecord(value: unknown): value is WorkflowRunRecord {
 
 function runFilePath(id: string): string {
 	return join(RUNS_DIR, `${normalizeWorkflowRunId(id)}.json`);
+}
+
+function runLockPath(id: string, name: string): string {
+	return join(RUNS_DIR, `${normalizeWorkflowRunId(id)}.${name}.lock`);
+}
+
+function isErrnoException(error: unknown): error is NodeJS.ErrnoException {
+	return error instanceof Error && "code" in error;
+}
+
+function sleep(ms: number): Promise<void> {
+	return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 async function readLegacyStore(): Promise<StoreFile> {
@@ -137,6 +150,34 @@ export async function appendRunLog(id: string, message: string): Promise<void> {
 	if (!run) return;
 	run.logs.push(`${nowIso()} ${message}`);
 	await saveRun(run);
+}
+
+export async function withRunLock<T>(
+	id: string,
+	name: string,
+	fn: () => Promise<T>,
+): Promise<T> {
+	const lockPath = runLockPath(id, name);
+	let handle: Awaited<ReturnType<typeof open>> | undefined;
+	while (!handle) {
+		try {
+			handle = await open(lockPath, "wx", 0o600);
+			await handle.writeFile(`${process.pid}\n`, "utf8");
+		} catch (error) {
+			if (isErrnoException(error) && error.code === "EEXIST") {
+				await sleep(RUN_LOCK_RETRY_MS);
+				continue;
+			}
+			throw error;
+		}
+	}
+
+	try {
+		return await fn();
+	} finally {
+		await handle.close();
+		await rm(lockPath, { force: true });
+	}
 }
 
 export const workflowRunStorePath = RUNS_DIR;

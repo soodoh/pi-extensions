@@ -5,6 +5,10 @@ import {
 	WorkflowRunner,
 } from "./src/runner";
 import { getRun, listRuns, workflowRunStorePath } from "./src/store";
+import {
+	truncateWorkflowText,
+	WORKFLOW_TEXT_FIELD_MAX_LENGTH,
+} from "./src/text-limits";
 import { isValidWorkflowRunId } from "./src/utils";
 import type { WorkflowRunRecord } from "./src/workflow-types";
 
@@ -80,6 +84,7 @@ const approvePlanParameters = Type.Object(
 		approvalNotes: Type.Optional(
 			Type.String({
 				description: "Optional user approval notes or constraints",
+				maxLength: WORKFLOW_TEXT_FIELD_MAX_LENGTH,
 			}),
 		),
 	},
@@ -101,6 +106,7 @@ const completeRunParameters = Type.Object(
 		summary: Type.Optional(
 			Type.String({
 				description: "Brief execution and validation summary",
+				maxLength: WORKFLOW_TEXT_FIELD_MAX_LENGTH,
 			}),
 		),
 	},
@@ -304,7 +310,10 @@ export function parseApprovePlanToolInput(
 	if (!Value.Check(approvePlanParameters, params)) {
 		throw new Error("Tool parameters must match workflow plan approval schema");
 	}
-	return params;
+	return {
+		...params,
+		approvalNotes: truncateWorkflowText(params.approvalNotes),
+	};
 }
 
 export function parseSubmitPlanToolInput(params: unknown): SubmitPlanToolInput {
@@ -314,11 +323,14 @@ export function parseSubmitPlanToolInput(params: unknown): SubmitPlanToolInput {
 	return params;
 }
 
-function parseCompleteRunInput(params: unknown): CompleteRunInput {
+export function parseCompleteRunInput(params: unknown): CompleteRunInput {
 	if (!Value.Check(completeRunParameters, params)) {
 		throw new Error("Tool parameters must match workflow completion schema");
 	}
-	return params;
+	return {
+		...params,
+		summary: truncateWorkflowText(params.summary),
+	};
 }
 
 function invalidRunIdMessage(command: string, runId: string): string {

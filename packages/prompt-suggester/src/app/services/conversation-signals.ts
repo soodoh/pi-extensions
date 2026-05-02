@@ -11,28 +11,23 @@ interface BranchMessageEntry {
 	message: AgentMessage;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isTextContentBlock(
+	value: unknown,
+): value is { type: "text"; text?: unknown } {
+	return isRecord(value) && value.type === "text";
+}
+
 function textFromContent(content: unknown): string {
 	if (typeof content === "string") return content;
 	if (!Array.isArray(content)) return "";
 	return content
-		.map((block) => {
-			if (block && typeof block === "object") {
-				if (
-					"type" in block &&
-					(block as { type?: string }).type === "text" &&
-					"text" in block
-				) {
-					return String((block as { text?: unknown }).text ?? "");
-				}
-			}
-			return "";
-		})
+		.map((block) => (isTextContentBlock(block) ? String(block.text ?? "") : ""))
 		.join("\n")
 		.trim();
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function isAgentMessage(value: unknown): value is AgentMessage {
@@ -86,25 +81,36 @@ function extractUnresolvedQuestions(text: string): string[] {
 		.filter((line) => line.endsWith("?"));
 }
 
+function usageNumber(
+	usage: Record<string, unknown>,
+	key: string,
+): number | undefined {
+	const value = usage[key];
+	return typeof value === "number" ? value : undefined;
+}
+
 function extractUsage(message: AgentMessage): SuggestionUsage | undefined {
-	const usage = (message as AgentMessage & { usage?: unknown }).usage as
-		| Partial<{
-				input: number;
-				output: number;
-				cacheRead: number;
-				cacheWrite: number;
-				totalTokens: number;
-				cost: { total?: number };
-		  }>
-		| undefined;
-	if (!usage) return undefined;
+	if (!isRecord(message) || !isRecord(message.usage)) return undefined;
+	const cost = isRecord(message.usage.cost) ? message.usage.cost : undefined;
 	return {
-		inputTokens: normalizeFiniteNonNegativeNumber(usage.input),
-		outputTokens: normalizeFiniteNonNegativeNumber(usage.output),
-		cacheReadTokens: normalizeFiniteNonNegativeNumber(usage.cacheRead),
-		cacheWriteTokens: normalizeFiniteNonNegativeNumber(usage.cacheWrite),
-		totalTokens: normalizeFiniteNonNegativeNumber(usage.totalTokens),
-		costTotal: normalizeFiniteNonNegativeNumber(usage.cost?.total),
+		inputTokens: normalizeFiniteNonNegativeNumber(
+			usageNumber(message.usage, "input"),
+		),
+		outputTokens: normalizeFiniteNonNegativeNumber(
+			usageNumber(message.usage, "output"),
+		),
+		cacheReadTokens: normalizeFiniteNonNegativeNumber(
+			usageNumber(message.usage, "cacheRead"),
+		),
+		cacheWriteTokens: normalizeFiniteNonNegativeNumber(
+			usageNumber(message.usage, "cacheWrite"),
+		),
+		totalTokens: normalizeFiniteNonNegativeNumber(
+			usageNumber(message.usage, "totalTokens"),
+		),
+		costTotal: normalizeFiniteNonNegativeNumber(
+			cost ? usageNumber(cost, "total") : undefined,
+		),
 	};
 }
 

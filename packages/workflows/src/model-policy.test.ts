@@ -83,6 +83,22 @@ describe("model policy", () => {
 		expect(selection.reason).toContain("first available candidate");
 	});
 
+	test("selectModel rejects empty model selectors", async () => {
+		await expect(
+			selectModel({ model: "" }, registry(), "worker"),
+		).rejects.toThrow(/non-empty string/);
+		await expect(
+			selectModel({ models: [] }, registry(), "worker"),
+		).rejects.toThrow(/at least one model/);
+		await expect(
+			selectModel(
+				{ models: ["anthropic/claude-sonnet-4", " "] },
+				registry(),
+				"worker",
+			),
+		).rejects.toThrow(/blank entries/);
+	});
+
 	test("applyModelPolicy applies selected model and explicit thinking", async () => {
 		const setModel = vi.fn();
 		const setThinkingLevel = vi.fn();

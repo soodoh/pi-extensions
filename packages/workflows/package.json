@@ -12,6 +12,7 @@
 		"src/plannotator.ts",
 		"src/runner.ts",
 		"src/store.ts",
+		"src/text-limits.ts",
 		"src/utils.ts",
 		"src/workflow-types.ts",
 		"src/yaml-loader.ts",

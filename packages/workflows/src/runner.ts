@@ -4,7 +4,8 @@ import { basename, join, relative, resolve } from "node:path";
 import { loadWorkflowConfig } from "./config-loader";
 import { applyModelPolicy } from "./model-policy";
 import { reviewPlanWithPlannotator } from "./plannotator";
-import { getRun, saveRun } from "./store";
+import { getRun, saveRun, withRunLock } from "./store";
+import { truncateWorkflowText } from "./text-limits";
 import {
 	ensureInsideCwd,
 	ensureRealPathInsideCwd,
@@ -45,7 +46,11 @@ async function resolveExistingPlanMarkdownPath(
 	if (!existsSync(lexicalFull) || !/\.mdx?$/i.test(lexicalFull)) {
 		throw new Error(planPathValidationMessage(filePath));
 	}
-	return ensureRealPathInsideCwd(cwd, filePath);
+	const realFull = await ensureRealPathInsideCwd(cwd, filePath);
+	if (!/\.mdx?$/i.test(realFull)) {
+		throw new Error(planPathValidationMessage(filePath));
+	}
+	return realFull;
 }
 
 function assertPlanContentWithinLimit(content: string, label: string): void {
@@ -290,8 +295,9 @@ export class WorkflowRunner {
 			);
 		run = latestRun;
 		if (!review.approved) {
+			const safeFeedback = truncateWorkflowText(review.feedback);
 			run.logs.push(
-				`${nowIso()} plan denied: ${review.feedback ?? "no feedback"}`,
+				`${nowIso()} plan denied: ${safeFeedback ?? "no feedback"}`,
 			);
 			run.phase = "planning";
 			await saveRun(run);
@@ -302,7 +308,7 @@ export class WorkflowRunner {
 		}
 		run.phase = "approved";
 		run.approvedPlanContent = planContent;
-		run.approvalNotes = review.feedback;
+		run.approvalNotes = truncateWorkflowText(review.feedback);
 		run.logs.push(`${nowIso()} plan approved review=${review.reviewId}`);
 		await saveRun(run);
 		const handoffError = await this.queueExecutionHandoff(run.id);
@@ -333,9 +339,10 @@ export class WorkflowRunner {
 		run.planContentHash = artifact.planContentHash;
 		run.approvedPlanContent = planContent;
 		run.phase = "approved";
-		run.approvalNotes = approvalNotes;
+		const safeApprovalNotes = truncateWorkflowText(approvalNotes);
+		run.approvalNotes = safeApprovalNotes;
 		run.logs.push(
-			`${nowIso()} plan prompt-approved${approvalNotes ? `: ${approvalNotes}` : ""}`,
+			`${nowIso()} plan prompt-approved${safeApprovalNotes ? `: ${safeApprovalNotes}` : ""}`,
 		);
 		await saveRun(run);
 		const handoffError = await this.queueExecutionHandoff(run.id);
@@ -397,7 +404,9 @@ export class WorkflowRunner {
 			this.continueExecutionLocks.get(runId) ?? Promise.resolve();
 		const current = (async () => {
 			await previous.catch(() => undefined);
-			await this.continueExecutionLocked(runId, ctx);
+			await withRunLock(runId, "continue", () =>
+				this.continueExecutionLocked(runId, ctx),
+			);
 		})();
 		this.continueExecutionLocks.set(runId, current);
 		try {
@@ -498,8 +507,9 @@ export class WorkflowRunner {
 				`Workflow run ${runId} is ${run.phase}; only executing runs can be completed or failed.`,
 			);
 		run.phase = status;
+		const safeSummary = truncateWorkflowText(summary);
 		run.logs.push(
-			`${nowIso()} execution ${status}${summary ? `: ${summary}` : ""}`,
+			`${nowIso()} execution ${status}${safeSummary ? `: ${safeSummary}` : ""}`,
 		);
 		await saveRun(run);
 		return { text: `Workflow ${runId} marked ${status}.` };

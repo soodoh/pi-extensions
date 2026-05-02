@@ -25,6 +25,19 @@ export interface ModelSelection {
 function modelKey(model: ModelLike): string {
 	return `${model.provider ?? ""}/${model.id ?? model.name ?? ""}`;
 }
+function validateModelPolicy(policy: ModelPolicy): void {
+	if (policy.model !== undefined && policy.model.trim().length === 0) {
+		throw new Error("modelPolicy.model must be a non-empty string");
+	}
+	if (policy.models !== undefined) {
+		if (policy.models.length === 0) {
+			throw new Error("modelPolicy.models must contain at least one model");
+		}
+		if (policy.models.some((model) => model.trim().length === 0)) {
+			throw new Error("modelPolicy.models must not contain blank entries");
+		}
+	}
+}
 function splitKey(key: string): [string, string] | undefined {
 	const index = key.indexOf("/");
 	if (index <= 0) return undefined;
@@ -103,6 +116,7 @@ export async function selectModel(
 		model: "inherit",
 		thinking: "inherit",
 	};
+	validateModelPolicy(effective);
 	const thinking = effective.thinking ?? "inherit";
 	if (
 		effective.model === "inherit" ||

@@ -444,7 +444,6 @@ function buildCompactLine(
 						providerUsageTargets,
 						theme,
 						providerMode === "active",
-						icons(),
 					);
 				case "context":
 					return renderContext(ctx, contextTokens, theme);

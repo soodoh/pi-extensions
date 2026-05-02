@@ -13,16 +13,6 @@ type ThemeLike = {
 	fg(color: string, text: string): string;
 };
 
-export type ProviderUsageIcons = {
-	provider: string;
-	anthropic: string;
-	openai: string;
-	openrouter: string;
-	github: string;
-	google: string;
-	antigravity: string;
-};
-
 type ProviderUsageAuthKind = "oauth" | "api_key" | "unknown";
 type ProviderUsageState = "ready" | "unknown" | "error" | "unsupported";
 
@@ -86,10 +76,6 @@ let providerUsageInvalidation = 0;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function withIcon(icon: string, text: string): string {
-	return icon ? `${icon} ${text}` : text;
 }
 
 function normalizeProviderId(providerId: string): string {
@@ -814,17 +800,6 @@ function providerShortLabel(providerId: string): string {
 	}
 }
 
-function providerIcon(providerId: string, iconSet: ProviderUsageIcons): string {
-	const family = providerFamily(providerId);
-	if (family === "anthropic") return iconSet.anthropic;
-	if (family === "openai") return iconSet.openai;
-	if (family === "openrouter") return iconSet.openrouter;
-	if (family === "github-copilot") return iconSet.github;
-	if (family === "google-gemini-cli") return iconSet.google;
-	if (family === "google-antigravity") return iconSet.antigravity;
-	return iconSet.provider;
-}
-
 function formatPercentValue(percent: number): string {
 	return Math.round(percent).toString();
 }
@@ -841,20 +816,17 @@ function formatProviderScope(
 	scope: ProviderUsageScope | undefined,
 ): string | undefined {
 	if (!scope) return undefined;
-	const usageParts: string[] = [];
-	if (scope.sessionPercentUsed !== undefined) {
-		usageParts.push(`${formatPercent(scope.sessionPercentUsed)} se`);
-	}
-	if (scope.weeklyPercentUsed !== undefined) {
-		usageParts.push(`${formatPercent(scope.weeklyPercentUsed)} wk`);
-	}
+	const periodPercents = [scope.sessionPercentUsed, scope.weeklyPercentUsed]
+		.filter((percent): percent is number => percent !== undefined)
+		.map(formatPercent);
+	const usageParts = [...periodPercents];
 	if (scope.monthlyPercentUsed !== undefined) {
 		usageParts.push(`${formatPercent(scope.monthlyPercentUsed)} mo`);
 	}
 	if (scope.percentUsed !== undefined) {
 		usageParts.push(formatPercent(scope.percentUsed));
 	}
-	if (usageParts.length > 0) return usageParts.join(" ");
+	if (usageParts.length > 0) return usageParts.join("/");
 	if (scope.balanceUsd !== undefined) return formatMoney(scope.balanceUsd);
 	if (scope.creditsUsd !== undefined) return formatMoney(scope.creditsUsd);
 	return undefined;
@@ -863,7 +835,6 @@ function formatProviderScope(
 function renderProviderBadge(
 	target: ProviderUsageTarget,
 	theme: ThemeLike,
-	iconSet: ProviderUsageIcons,
 ): string | undefined {
 	const status = providerUsageCache.get(
 		providerCacheKey(target.providerId, target.authKind),
@@ -873,10 +844,7 @@ function renderProviderBadge(
 	if (!scopeText && !target.active) return undefined;
 
 	const usageText = scopeText ?? "?";
-	const label = withIcon(
-		providerIcon(target.providerId, iconSet),
-		providerShortLabel(target.providerId),
-	);
+	const label = providerShortLabel(target.providerId);
 	return theme.fg("dim", `${label} ${usageText}`);
 }
 
@@ -884,11 +852,10 @@ export function renderProviderUsage(
 	targets: ProviderUsageTarget[],
 	theme: ThemeLike,
 	activeOnly: boolean,
-	iconSet: ProviderUsageIcons,
 ): string | undefined {
 	const badges = targets
 		.filter((target) => !activeOnly || target.active)
-		.map((target) => renderProviderBadge(target, theme, iconSet))
+		.map((target) => renderProviderBadge(target, theme))
 		.filter((badge): badge is string => Boolean(badge));
 
 	return badges.length > 0 ? badges.join(PROVIDER_BADGE_SEPARATOR) : undefined;

@@ -3,23 +3,12 @@ import type { ProviderUsageContext } from "./pi-types";
 import {
 	discoverProviderUsageTargets,
 	invalidateProviderUsageCache,
-	type ProviderUsageIcons,
 	type ProviderUsageTarget,
 	refreshProviderUsage,
 	renderProviderUsage,
 } from "./provider-usage";
 
 const theme = { fg: (_color: string, text: string) => text };
-const iconSet: ProviderUsageIcons = {
-	provider: "",
-	anthropic: "",
-	openai: "",
-	openrouter: "",
-	github: "",
-	google: "",
-	antigravity: "",
-};
-
 type FetchCall = {
 	url: string;
 	init: RequestInit;
@@ -71,7 +60,7 @@ async function refreshAndWait(
 }
 
 function render(targets: ProviderUsageTarget[], activeOnly = false): string {
-	return renderProviderUsage(targets, theme, activeOnly, iconSet) ?? "";
+	return renderProviderUsage(targets, theme, activeOnly) ?? "";
 }
 
 function jwtWithPayload(payload: Record<string, unknown>): string {
@@ -178,7 +167,7 @@ describe("provider usage", () => {
 		expect(headersRecord(calls[0].init.headers)).toMatchObject({
 			Authorization: "Bearer stored-anthropic-token",
 		});
-		expect(render(targets)).toContain("Anth 12% se 55% wk");
+		expect(render(targets)).toContain("Anth 12%/55%");
 	});
 
 	test("uses OpenAI Codex JWT account header and renders credit balance", async () => {
@@ -308,7 +297,7 @@ describe("provider usage", () => {
 
 		await refreshAndWait(ctx, targets);
 
-		expect(render(targets)).toBe("OR $2.50 · Anth 10% se");
-		expect(render(targets, true)).toBe("Anth 10% se");
+		expect(render(targets)).toBe("OR $2.50 · Anth 10%");
+		expect(render(targets, true)).toBe("Anth 10%");
 	});
 });

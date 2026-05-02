@@ -223,6 +223,8 @@ export function buildTurnContext(params: {
 export function buildLatestHistoricalTurnContext(params: {
 	branchEntries: BranchMessageEntry[];
 }): TurnContext | null {
+	if (params.branchEntries.at(-1)?.message.role === "user") return null;
+
 	let lastRelevantIndex = -1;
 	for (let i = params.branchEntries.length - 1; i >= 0; i -= 1) {
 		if (params.branchEntries[i]?.message.role !== "user") {

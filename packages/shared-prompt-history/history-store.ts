@@ -49,6 +49,7 @@ async function ensurePrivateDirectory(path: string): Promise<void> {
 
 async function readLastPrompt(
 	historyPath: string,
+	maxBytes = DEFAULT_HISTORY_TAIL_BYTES,
 ): Promise<string | undefined> {
 	let file: Awaited<ReturnType<typeof open>>;
 	try {
@@ -61,10 +62,12 @@ async function readLastPrompt(
 	try {
 		const { size } = await file.stat();
 		let position = size;
+		let remainingBytes = Math.max(TAIL_READ_CHUNK_SIZE, Math.floor(maxBytes));
 		let text = "";
-		while (position > 0) {
-			const length = Math.min(TAIL_READ_CHUNK_SIZE, position);
+		while (position > 0 && remainingBytes > 0) {
+			const length = Math.min(TAIL_READ_CHUNK_SIZE, position, remainingBytes);
 			position -= length;
+			remainingBytes -= length;
 			const buffer = Buffer.alloc(length);
 			const { bytesRead } = await file.read(buffer, 0, length, position);
 			text = `${buffer.subarray(0, bytesRead).toString("utf8")}${text}`;

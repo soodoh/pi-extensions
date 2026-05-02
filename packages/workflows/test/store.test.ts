@@ -85,6 +85,32 @@ describe("workflow run store", () => {
 		expect(fileMode).toBe(0o600);
 	});
 
+	test("creates the per-run store directory before locking legacy-only runs", async () => {
+		const home = await tempHome("pi-workflows-store-legacy-lock-home");
+		const legacyPath = join(home, ".pi", "agent", "workflow-runs.json");
+		await mkdir(join(home, ".pi", "agent"), { recursive: true });
+		await writeFile(
+			legacyPath,
+			JSON.stringify({
+				runs: [runRecord("pwf-66666666", "2026-05-01T00:00:00.000Z")],
+			}),
+			"utf8",
+		);
+		const { getRun, withRunLock, workflowRunStorePath } =
+			await importStoreWithHome(home);
+		let ran = false;
+
+		await withRunLock("pwf-66666666", "continue", async () => {
+			ran = true;
+		});
+
+		expect(ran).toBe(true);
+		expect((await stat(workflowRunStorePath)).mode & 0o777).toBe(0o700);
+		await expect(getRun("pwf-66666666")).resolves.toMatchObject({
+			id: "pwf-66666666",
+		});
+	});
+
 	test("removes a stale run lock before running a continuation", async () => {
 		const home = await tempHome("pi-workflows-store-stale-lock-home");
 		const { withRunLock, workflowRunStorePath } =

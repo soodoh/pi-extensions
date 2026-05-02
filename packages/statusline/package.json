@@ -8,6 +8,7 @@
 		"index.ts",
 		"src/index.ts",
 		"src/git-status.ts",
+		"src/pi-types.ts",
 		"src/provider-usage.ts",
 		"README.md"
 	],

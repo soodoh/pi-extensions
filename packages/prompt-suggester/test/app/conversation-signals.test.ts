@@ -1,5 +1,8 @@
 import { describe, expect, test } from "vitest";
-import { buildTurnContext } from "../../src/app/services/conversation-signals";
+import {
+	buildLatestHistoricalTurnContext,
+	buildTurnContext,
+} from "../../src/app/services/conversation-signals";
 
 describe("conversation signal extraction", () => {
 	test("malformed assistant tool call arguments do not throw", () => {
@@ -41,6 +44,53 @@ describe("conversation signal extraction", () => {
 			"bash(bun test)",
 		]);
 		expect(context?.touchedFiles).toEqual([]);
+	});
+
+	test("latest historical context is not built when the branch ends with a user prompt", () => {
+		const context = buildLatestHistoricalTurnContext({
+			branchEntries: [
+				{
+					id: "user-1",
+					message: { role: "user", content: "Fix the tests", timestamp: 1 },
+				},
+				{
+					id: "assistant-1",
+					message: {
+						role: "assistant",
+						content: [{ type: "text", text: "I will fix them." }],
+						timestamp: 2,
+						api: "test",
+						provider: "test",
+						model: "test-model",
+						usage: {
+							input: 1,
+							output: 1,
+							cacheRead: 0,
+							cacheWrite: 0,
+							totalTokens: 2,
+							cost: {
+								input: 0,
+								output: 0,
+								cacheRead: 0,
+								cacheWrite: 0,
+								total: 0,
+							},
+						},
+						stopReason: "stop",
+					},
+				},
+				{
+					id: "user-2",
+					message: {
+						role: "user",
+						content: "Actually, update docs",
+						timestamp: 3,
+					},
+				},
+			],
+		});
+
+		expect(context).toBeNull();
 	});
 
 	test("assistant usage extraction sanitizes malformed values", () => {

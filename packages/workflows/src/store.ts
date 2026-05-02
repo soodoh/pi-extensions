@@ -1,5 +1,13 @@
 import { existsSync } from "node:fs";
-import { open, readdir, readFile, rm, stat } from "node:fs/promises";
+import {
+	chmod,
+	mkdir,
+	open,
+	readdir,
+	readFile,
+	rm,
+	stat,
+} from "node:fs/promises";
 import { basename, extname, join } from "node:path";
 import { Type } from "typebox";
 import { Value } from "typebox/value";
@@ -72,6 +80,19 @@ function runLockPath(id: string, name: string): string {
 
 function isErrnoException(error: unknown): error is NodeJS.ErrnoException {
 	return error instanceof Error && "code" in error;
+}
+
+async function chmodIfPossible(path: string, mode: number): Promise<void> {
+	try {
+		await chmod(path, mode);
+	} catch {
+		// Best effort: chmod may be unsupported on some filesystems.
+	}
+}
+
+async function ensureRunsDir(): Promise<void> {
+	await mkdir(RUNS_DIR, { recursive: true, mode: 0o700 });
+	await chmodIfPossible(RUNS_DIR, 0o700);
 }
 
 function errorMessage(error: unknown): string {
@@ -213,6 +234,7 @@ export async function withRunLock<T>(
 	fn: () => Promise<T>,
 ): Promise<T> {
 	const lockPath = runLockPath(id, name);
+	await ensureRunsDir();
 	const deadline = Date.now() + RUN_LOCK_MAX_WAIT_MS;
 	let handle: Awaited<ReturnType<typeof open>> | undefined;
 	let lastWaitCause: unknown = "lock is held by another process";

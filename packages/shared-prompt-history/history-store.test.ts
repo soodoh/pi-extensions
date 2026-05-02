@@ -87,6 +87,18 @@ describe("shared prompt history store", () => {
 		]);
 	});
 
+	test("treats duplicate detection as empty when the tail cap has no valid prompt", async () => {
+		const dir = await makeTempDir();
+		const historyPath = join(dir, "prompt-history.jsonl");
+		await writeFile(
+			historyPath,
+			`${JSON.stringify({ prompt: "same" })}\n${"not-json\n".repeat(70_000)}unterminated`,
+			"utf8",
+		);
+
+		await expect(appendPrompt("same", historyPath)).resolves.toBe(true);
+	});
+
 	test("suppresses duplicates when multiple editor states supply stale previous prompts", async () => {
 		const dir = await makeTempDir();
 		const historyPath = join(dir, "prompt-history.jsonl");

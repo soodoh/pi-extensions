@@ -5,6 +5,7 @@ import {
 	invalidateGit,
 	type ReadonlyFooterDataProvider,
 } from "./git-status";
+import type { ModelLike, ModelRegistryLike } from "./pi-types";
 import {
 	discoverProviderUsageTargets,
 	invalidateProviderUsageCache,
@@ -19,47 +20,6 @@ type Theme = {
 
 type TuiLike = {
 	requestRender?: () => void;
-};
-
-type ModelLike = {
-	name?: string;
-	id?: string;
-	contextWindow?: number;
-	provider?: string;
-	api?: string;
-	baseUrl?: string;
-};
-
-type AuthCredentialLike =
-	| {
-			type: "oauth";
-			access?: string;
-			refresh?: string;
-	  }
-	| { type: "api_key" };
-
-type AuthStorageLike = {
-	get?(provider: string): AuthCredentialLike | undefined;
-	list?(): string[];
-	hasAuth?(provider: string): boolean;
-	getOAuthProviders?(): { id: string; name?: string }[];
-};
-
-type MaybePromise<T> = T | Promise<T>;
-
-type ModelRegistryLike = {
-	getAll?(): ModelLike[];
-	getAvailable?(): MaybePromise<ModelLike[]>;
-	hasConfiguredAuth?(model: ModelLike): boolean;
-	getProviderAuthStatus?(provider: string): {
-		configured: boolean;
-		source?: string;
-		label?: string;
-	};
-	getProviderDisplayName?(provider: string): string;
-	getApiKeyForProvider?(provider: string): Promise<string | undefined>;
-	isUsingOAuth?(model: ModelLike): boolean;
-	authStorage?: AuthStorageLike;
 };
 
 type ExtensionContext = {

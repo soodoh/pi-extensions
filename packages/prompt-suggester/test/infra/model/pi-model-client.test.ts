@@ -7,10 +7,10 @@ import { afterEach, expect, test } from "vitest";
 import type { Logger } from "../../../src/app/ports/logger";
 import type { SuggestionPromptContext } from "../../../src/app/services/prompt-context-builder";
 import {
-	globToRegExp,
 	PiModelClient,
 	type RuntimeContextProvider,
 } from "../../../src/infra/model/pi-model-client";
+import { globToRegExp } from "../../../src/infra/model/seeder-tools";
 
 const { registerApiProvider, unregisterApiProviders } = await import(
 	pathToFileURL(

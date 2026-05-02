@@ -9,7 +9,6 @@ import type { ModelLike, ModelRegistryLike } from "./pi-types";
 import {
 	discoverProviderUsageTargets,
 	invalidateProviderUsageCache,
-	isProviderUsageEnabled,
 	refreshProviderUsage,
 	renderProviderUsage,
 } from "./provider-usage";
@@ -61,6 +60,8 @@ type ExtensionContext = {
 	modelRegistry?: ModelRegistryLike;
 	settingsManager?: {
 		getCompactionSettings?(): { enabled?: boolean } | undefined;
+		getGlobalSettings?(): Record<string, unknown>;
+		getProjectSettings?(): Record<string, unknown>;
 	};
 	getContextUsage?():
 		| {
@@ -151,6 +152,15 @@ type AssistantTokenUsage = {
 	cacheWrite: number;
 };
 
+type StatuslineSection = "model" | "git" | "provider_usage" | "context";
+type ProviderUsageRenderMode = "full" | "active" | "omit";
+
+const DEFAULT_STATUSLINE_SECTIONS: StatuslineSection[] = [
+	"model",
+	"git",
+	"provider_usage",
+	"context",
+];
 const COLORS: Record<SemanticColor, ColorValue> = {
 	model: "#d787af",
 	gitDirty: "warning",
@@ -163,6 +173,72 @@ const COLORS: Record<SemanticColor, ColorValue> = {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function configuredSectionsFromSettings(
+	settings: Record<string, unknown> | undefined,
+): { present: boolean; value?: unknown } {
+	if (!settings) return { present: false };
+	const statusline = settings.statusline;
+	if (!isRecord(statusline)) return { present: false };
+	if (!Object.hasOwn(statusline, "sections")) {
+		return { present: false };
+	}
+	return { present: true, value: statusline.sections };
+}
+
+function isStatuslineSection(value: string): value is StatuslineSection {
+	return (
+		value === "model" ||
+		value === "git" ||
+		value === "provider_usage" ||
+		value === "context"
+	);
+}
+
+function parseStatuslineSections(
+	value: unknown,
+): StatuslineSection[] | undefined {
+	if (!Array.isArray(value)) return undefined;
+
+	const sections: StatuslineSection[] = [];
+	const seen = new Set<StatuslineSection>();
+	for (const item of value) {
+		if (typeof item !== "string" || !isStatuslineSection(item)) continue;
+		if (seen.has(item)) continue;
+		seen.add(item);
+		sections.push(item);
+	}
+
+	return sections.length > 0 ? sections : undefined;
+}
+
+function getStatuslineSections(ctx: ExtensionContext): StatuslineSection[] {
+	const projectSetting = configuredSectionsFromSettings(
+		ctx.settingsManager?.getProjectSettings?.(),
+	);
+	if (projectSetting.present) {
+		return (
+			parseStatuslineSections(projectSetting.value) ??
+			DEFAULT_STATUSLINE_SECTIONS
+		);
+	}
+
+	const globalSetting = configuredSectionsFromSettings(
+		ctx.settingsManager?.getGlobalSettings?.(),
+	);
+	if (globalSetting.present) {
+		return (
+			parseStatuslineSections(globalSetting.value) ??
+			DEFAULT_STATUSLINE_SECTIONS
+		);
+	}
+
+	return DEFAULT_STATUSLINE_SECTIONS;
+}
+
+function hasProviderUsageSection(ctx: ExtensionContext): boolean {
+	return getStatuslineSections(ctx).includes("provider_usage");
 }
 
 function hasNerdFonts(): boolean {
@@ -335,7 +411,8 @@ function buildCompactLine(
 	onUpdate: () => void,
 	width: number,
 ): string {
-	const providerUsageEnabled = isProviderUsageEnabled();
+	const sections = getStatuslineSections(ctx);
+	const providerUsageEnabled = sections.includes("provider_usage");
 	const providerUsageTargets = providerUsageEnabled
 		? discoverProviderUsageTargets(ctx)
 		: [];
@@ -343,31 +420,46 @@ function buildCompactLine(
 		refreshProviderUsage(ctx, providerUsageTargets, onUpdate);
 	}
 
-	const contextTokens = collectContextTokens(ctx);
+	const contextTokens = sections.includes("context")
+		? collectContextTokens(ctx)
+		: 0;
 	const providerBranch = footerData?.getGitBranch() ?? null;
-	const git = getGitStatus(sessionCwd(ctx), providerBranch, onUpdate);
-	const modelPart = renderModel(ctx, theme);
-	const gitPart = renderGit(git, theme);
-	const contextPart = renderContext(ctx, contextTokens, theme);
-	const providerPart = providerUsageEnabled
-		? renderProviderUsage(providerUsageTargets, theme, false, icons())
-		: undefined;
-	const activeProviderPart = providerUsageEnabled
-		? renderProviderUsage(providerUsageTargets, theme, true, icons())
+	const git = sections.includes("git")
+		? getGitStatus(sessionCwd(ctx), providerBranch, onUpdate)
 		: undefined;
 
-	const fullLine = formatLine([modelPart, gitPart, providerPart, contextPart]);
+	const renderSectionParts = (
+		providerMode: ProviderUsageRenderMode,
+	): (string | undefined)[] =>
+		sections.map((section) => {
+			switch (section) {
+				case "model":
+					return renderModel(ctx, theme);
+				case "git":
+					return git ? renderGit(git, theme) : undefined;
+				case "provider_usage":
+					if (!providerUsageEnabled || providerMode === "omit")
+						return undefined;
+					return renderProviderUsage(
+						providerUsageTargets,
+						theme,
+						providerMode === "active",
+						icons(),
+					);
+				case "context":
+					return renderContext(ctx, contextTokens, theme);
+				default:
+					return undefined;
+			}
+		});
+
+	const fullLine = formatLine(renderSectionParts("full"));
 	if (!width || displayLength(fullLine) <= width) return fullLine;
 
-	const activeProviderLine = formatLine([
-		modelPart,
-		gitPart,
-		activeProviderPart,
-		contextPart,
-	]);
+	const activeProviderLine = formatLine(renderSectionParts("active"));
 	if (displayLength(activeProviderLine) <= width) return activeProviderLine;
 
-	return formatLine([modelPart, gitPart, contextPart]);
+	return formatLine(renderSectionParts("omit"));
 }
 
 export default function statusline(pi: ExtensionAPI): void {
@@ -378,7 +470,7 @@ export default function statusline(pi: ExtensionAPI): void {
 	const requestRender = () => tuiRef?.requestRender?.();
 	const refreshCurrentProviderUsage = (ctx: ExtensionContext): void => {
 		currentCtx = ctx;
-		if (isProviderUsageEnabled()) {
+		if (hasProviderUsageSection(ctx)) {
 			refreshProviderUsage(
 				ctx,
 				discoverProviderUsageTargets(ctx),
@@ -390,7 +482,7 @@ export default function statusline(pi: ExtensionAPI): void {
 	function install(ctx: ExtensionContext): void {
 		if (!ctx.hasUI) return;
 		currentCtx = ctx;
-		if (isProviderUsageEnabled()) {
+		if (hasProviderUsageSection(ctx)) {
 			refreshProviderUsage(
 				ctx,
 				discoverProviderUsageTargets(ctx),

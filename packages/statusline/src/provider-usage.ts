@@ -7,7 +7,6 @@ import type {
 
 const PROVIDER_USAGE_TTL_MS = 5 * 60 * 1000;
 const PROVIDER_USAGE_FETCH_TIMEOUT_MS = 5000;
-const PROVIDER_USAGE_ENV = "PI_STATUSLINE_PROVIDER_USAGE";
 const PROVIDER_BADGE_SEPARATOR = " · ";
 
 type ThemeLike = {
@@ -87,11 +86,6 @@ let providerUsageInvalidation = 0;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-export function isProviderUsageEnabled(): boolean {
-	const value = process.env[PROVIDER_USAGE_ENV]?.trim().toLowerCase();
-	return value === "1" || value === "true" || value === "yes" || value === "on";
 }
 
 function withIcon(icon: string, text: string): string {

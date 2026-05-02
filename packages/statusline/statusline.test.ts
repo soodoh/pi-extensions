@@ -58,7 +58,11 @@ type StatuslineContext = {
 		};
 	};
 	sessionManager: { getBranch(): unknown[]; getCwd?(): string };
-	settingsManager: { getCompactionSettings(): { enabled: boolean } };
+	settingsManager: {
+		getCompactionSettings(): { enabled: boolean };
+		getGlobalSettings?(): Record<string, unknown>;
+		getProjectSettings?(): Record<string, unknown>;
+	};
 	getContextUsage(): { tokens: number; contextWindow: number; percent: number };
 };
 
@@ -136,8 +140,167 @@ describe("statusline extension", () => {
 		expect(line).toContain("25.0%/1.0k");
 	});
 
+	test("renders configured sections in configured order", () => {
+		let widgetFactory: WidgetFactory | undefined;
+		let footerFactory: FooterFactory | undefined;
+		const pi = createPi();
+		statusline(pi);
+		const ctx: StatuslineContext = {
+			hasUI: true,
+			ui: {
+				setFooter(factory) {
+					footerFactory = factory;
+				},
+				setWidget(_key, factory) {
+					widgetFactory = factory;
+				},
+			},
+			model: { name: "Test Model", contextWindow: 1000 },
+			modelRegistry: {
+				getAvailable() {
+					return [];
+				},
+				async getApiKeyForProvider() {
+					return undefined;
+				},
+			},
+			sessionManager: { getBranch: () => [] },
+			settingsManager: {
+				getCompactionSettings: () => ({ enabled: true }),
+				getGlobalSettings: () => ({
+					statusline: { sections: ["context", "model"] },
+				}),
+			},
+			getContextUsage: () => ({
+				tokens: 125,
+				contextWindow: 1000,
+				percent: 12.5,
+			}),
+		};
+
+		pi.handlers.get("session_start")?.({}, ctx);
+		footerFactory?.(
+			{},
+			{ fg: (_color, text) => text },
+			{ getGitBranch: () => "main", onBranchChange: () => () => undefined },
+		);
+		const line =
+			widgetFactory?.({}, { fg: (_color, text) => text })
+				.render(120)
+				.join("\n") ?? "";
+
+		expect(line).toContain("12.5%/1.0k");
+		expect(line).toContain("Test Model");
+		expect(line).not.toContain("main");
+		expect(line.indexOf("12.5%/1.0k")).toBeLessThan(line.indexOf("Test Model"));
+	});
+
+	test("renders default relative section order when provider_usage is omitted", () => {
+		let widgetFactory: WidgetFactory | undefined;
+		let footerFactory: FooterFactory | undefined;
+		const pi = createPi();
+		statusline(pi);
+		const ctx: StatuslineContext = {
+			hasUI: true,
+			ui: {
+				setFooter(factory) {
+					footerFactory = factory;
+				},
+				setWidget(_key, factory) {
+					widgetFactory = factory;
+				},
+			},
+			model: { name: "Test Model", contextWindow: 1000 },
+			modelRegistry: {
+				getAvailable() {
+					return [];
+				},
+				async getApiKeyForProvider() {
+					return undefined;
+				},
+			},
+			sessionManager: { getBranch: () => [] },
+			settingsManager: {
+				getCompactionSettings: () => ({ enabled: true }),
+				getGlobalSettings: () => ({
+					statusline: { sections: ["model", "git", "context"] },
+				}),
+			},
+			getContextUsage: () => ({
+				tokens: 125,
+				contextWindow: 1000,
+				percent: 12.5,
+			}),
+		};
+
+		pi.handlers.get("session_start")?.({}, ctx);
+		footerFactory?.(
+			{},
+			{ fg: (_color, text) => text },
+			{ getGitBranch: () => "main", onBranchChange: () => () => undefined },
+		);
+		const line =
+			widgetFactory?.({}, { fg: (_color, text) => text })
+				.render(120)
+				.join("\n") ?? "";
+
+		expect(line).toContain("Test Model");
+		expect(line).toContain("main");
+		expect(line).toContain("12.5%/1.0k");
+		expect(line.indexOf("Test Model")).toBeLessThan(line.indexOf("main"));
+		expect(line.indexOf("main")).toBeLessThan(line.indexOf("12.5%/1.0k"));
+	});
+
+	test("invalid project sections override global sections and fall back to defaults", () => {
+		let widgetFactory: WidgetFactory | undefined;
+		const pi = createPi();
+		statusline(pi);
+		const ctx: StatuslineContext = {
+			hasUI: true,
+			ui: {
+				setFooter() {},
+				setWidget(_key, factory) {
+					widgetFactory = factory;
+				},
+			},
+			model: { name: "Test Model", contextWindow: 1000 },
+			modelRegistry: {
+				getAvailable() {
+					return [];
+				},
+				async getApiKeyForProvider() {
+					return undefined;
+				},
+			},
+			sessionManager: { getBranch: () => [] },
+			settingsManager: {
+				getCompactionSettings: () => ({ enabled: true }),
+				getGlobalSettings: () => ({
+					statusline: { sections: ["context"] },
+				}),
+				getProjectSettings: () => ({
+					statusline: { sections: ["unknown"] },
+				}),
+			},
+			getContextUsage: () => ({
+				tokens: 125,
+				contextWindow: 1000,
+				percent: 12.5,
+			}),
+		};
+
+		pi.handlers.get("session_start")?.({}, ctx);
+		const line =
+			widgetFactory?.({}, { fg: (_color, text) => text })
+				.render(120)
+				.join("\n") ?? "";
+
+		expect(line).toContain("Test Model");
+		expect(line).toContain("12.5%/1.0k");
+		expect(line.indexOf("Test Model")).toBeLessThan(line.indexOf("12.5%/1.0k"));
+	});
+
 	test("handles async modelRegistry.getAvailable without iterating promises", () => {
-		vi.stubEnv("PI_STATUSLINE_PROVIDER_USAGE", "1");
 		let widgetFactory: WidgetFactory | undefined;
 		const pi = createPi();
 		statusline(pi);
@@ -169,7 +332,7 @@ describe("statusline extension", () => {
 		).not.toThrow();
 	});
 
-	test("skips provider usage network egress by default", async () => {
+	test("skips provider usage network egress when provider_usage is not configured", async () => {
 		const fetchMock = vi.fn(async () => Response.json({}));
 		vi.stubGlobal("fetch", fetchMock);
 		let widgetFactory: WidgetFactory | undefined;
@@ -196,7 +359,12 @@ describe("statusline extension", () => {
 				},
 			},
 			sessionManager: { getBranch: () => [] },
-			settingsManager: { getCompactionSettings: () => ({ enabled: true }) },
+			settingsManager: {
+				getCompactionSettings: () => ({ enabled: true }),
+				getGlobalSettings: () => ({
+					statusline: { sections: ["model", "context"] },
+				}),
+			},
 			getContextUsage: () => ({ tokens: 0, contextWindow: 1000, percent: 0 }),
 		};
 
@@ -209,8 +377,7 @@ describe("statusline extension", () => {
 		expect(fetchMock).not.toHaveBeenCalled();
 	});
 
-	test("uses stored GitHub Copilot access credential for OAuth usage when enabled", async () => {
-		vi.stubEnv("PI_STATUSLINE_PROVIDER_USAGE", "1");
+	test("uses stored GitHub Copilot access credential for OAuth usage by default", async () => {
 		const fetchCalls: RequestInit[] = [];
 		const fetchMock = vi.fn(
 			async (_url: string | URL | Request, init?: RequestInit) => {

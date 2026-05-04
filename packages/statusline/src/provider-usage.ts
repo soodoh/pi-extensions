@@ -822,7 +822,7 @@ function formatProviderScope(
 		.map(formatPercent);
 	const usageParts = [...periodPercents];
 	if (scope.monthlyPercentUsed !== undefined) {
-		usageParts.push(`${formatPercent(scope.monthlyPercentUsed)} mo`);
+		usageParts.push(formatPercent(scope.monthlyPercentUsed));
 	}
 	if (scope.percentUsed !== undefined) {
 		usageParts.push(formatPercent(scope.percentUsed));

@@ -335,7 +335,7 @@ describe("provider usage", () => {
 		expect(headersRecord(calls[0].init.headers)).toMatchObject({
 			Authorization: "token github-oauth-token",
 		});
-		expect(render(targets)).toContain("GH 30% mo");
+		expect(render(targets)).toContain("GH 30%");
 	});
 
 	test("falls back to getApiKeyForProvider when GitHub Copilot has no refresh token", async () => {
@@ -373,6 +373,6 @@ describe("provider usage", () => {
 		expect(headersRecord(calls[0].init.headers)).toMatchObject({
 			Authorization: "token fallback-api-token",
 		});
-		expect(render(targets)).toContain("GH 50% mo");
+		expect(render(targets)).toContain("GH 50%");
 	});
 });

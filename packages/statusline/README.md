@@ -68,7 +68,25 @@ The rendered line is width-aware and may omit provider detail in narrow terminal
 
 ## Configuration
 
-The statusline sections are configured with an ordered `statusline.sections` array in Pi settings. The default is:
+The statusline layout is configured with a `statusline.sections` array in Pi settings. It supports two formats:
+
+### Multi-line layout (default)
+
+Use a nested array where each inner array defines one line:
+
+```json
+{
+  "statusline": {
+    "sections": [["model", "git", "context"], ["provider_usage"]]
+  }
+}
+```
+
+The default layout renders two lines: model, git, and context on the first line, and provider usage on the second.
+
+### Single-line layout
+
+Use a flat array to render everything on one line:
 
 ```json
 {
@@ -80,12 +98,22 @@ The statusline sections are configured with an ordered `statusline.sections` arr
 
 Supported sections are `model`, `git`, `provider_usage`, and `context`. The statusline renders only the configured sections and preserves their order. Provider usage token/quota lookups only run when `provider_usage` is present.
 
-For example, to show only context then model:
+For example, to show only context then model on a single line:
 
 ```json
 {
   "statusline": {
     "sections": ["context", "model"]
+  }
+}
+```
+
+Or to put git on a separate line from the model:
+
+```json
+{
+  "statusline": {
+    "sections": [["model", "context"], ["git"]]
   }
 }
 ```

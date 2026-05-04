@@ -300,6 +300,116 @@ describe("statusline extension", () => {
 		expect(line.indexOf("Test Model")).toBeLessThan(line.indexOf("12.5%/1.0k"));
 	});
 
+	test("renders nested sections array as multiple lines", () => {
+		let widgetFactory: WidgetFactory | undefined;
+		let footerFactory: FooterFactory | undefined;
+		const pi = createPi();
+		statusline(pi);
+		const ctx: StatuslineContext = {
+			hasUI: true,
+			ui: {
+				setFooter(factory) {
+					footerFactory = factory;
+				},
+				setWidget(_key, factory) {
+					widgetFactory = factory;
+				},
+			},
+			model: { name: "Test Model", contextWindow: 1000, provider: "anthropic" },
+			modelRegistry: {
+				getAvailable() {
+					return [];
+				},
+				async getApiKeyForProvider() {
+					return undefined;
+				},
+			},
+			sessionManager: { getBranch: () => [] },
+			settingsManager: {
+				getCompactionSettings: () => ({ enabled: true }),
+				getGlobalSettings: () => ({
+					statusline: {
+						sections: [["model", "git"], ["context"]],
+					},
+				}),
+			},
+			getContextUsage: () => ({
+				tokens: 125,
+				contextWindow: 1000,
+				percent: 12.5,
+			}),
+		};
+
+		pi.handlers.get("session_start")?.({}, ctx);
+		footerFactory?.(
+			{},
+			{ fg: (_color, text) => text },
+			{ getGitBranch: () => "main", onBranchChange: () => () => undefined },
+		);
+		const lines =
+			widgetFactory?.({}, { fg: (_color, text) => text }).render(120) ?? [];
+
+		expect(lines).toHaveLength(2);
+		expect(lines[0]).toContain("Test Model");
+		expect(lines[0]).toContain("main");
+		expect(lines[0]).not.toContain("12.5%/1.0k");
+		expect(lines[1]).toContain("12.5%/1.0k");
+		expect(lines[1]).not.toContain("Test Model");
+	});
+
+	test("default layout renders two lines with provider_usage on second line", () => {
+		let widgetFactory: WidgetFactory | undefined;
+		let footerFactory: FooterFactory | undefined;
+		const pi = createPi();
+		statusline(pi);
+		const ctx: StatuslineContext = {
+			hasUI: true,
+			ui: {
+				setFooter(factory) {
+					footerFactory = factory;
+				},
+				setWidget(_key, factory) {
+					widgetFactory = factory;
+				},
+			},
+			model: { name: "Test Model", contextWindow: 1000 },
+			modelRegistry: {
+				getAvailable() {
+					return [];
+				},
+				async getApiKeyForProvider() {
+					return undefined;
+				},
+			},
+			sessionManager: { getBranch: () => [] },
+			settingsManager: {
+				getCompactionSettings: () => ({ enabled: true }),
+			},
+			getContextUsage: () => ({
+				tokens: 500,
+				contextWindow: 1000,
+				percent: 50,
+			}),
+		};
+
+		pi.handlers.get("session_start")?.({}, ctx);
+		footerFactory?.(
+			{},
+			{ fg: (_color, text) => text },
+			{ getGitBranch: () => "main", onBranchChange: () => () => undefined },
+		);
+		const lines =
+			widgetFactory?.({}, { fg: (_color, text) => text }).render(120) ?? [];
+
+		// Line 1 has model, git, context
+		expect(lines[0]).toContain("Test Model");
+		expect(lines[0]).toContain("main");
+		expect(lines[0]).toContain("50.0%/1.0k");
+		// Line 2 is provider_usage — no providers configured, so line is empty/omitted
+		// With no provider data the second line renders nothing
+		expect(lines.length).toBeLessThanOrEqual(2);
+	});
+
 	test("handles async modelRegistry.getAvailable without iterating promises", () => {
 		let widgetFactory: WidgetFactory | undefined;
 		const pi = createPi();

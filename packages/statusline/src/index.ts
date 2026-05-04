@@ -153,13 +153,12 @@ type AssistantTokenUsage = {
 };
 
 type StatuslineSection = "model" | "git" | "provider_usage" | "context";
+type StatuslineLayout = StatuslineSection[][];
 type ProviderUsageRenderMode = "full" | "active" | "omit";
 
-const DEFAULT_STATUSLINE_SECTIONS: StatuslineSection[] = [
-	"model",
-	"git",
-	"provider_usage",
-	"context",
+const DEFAULT_STATUSLINE_LAYOUT: StatuslineLayout = [
+	["model", "git", "context"],
+	["provider_usage"],
 ];
 const COLORS: Record<SemanticColor, ColorValue> = {
 	model: "#d787af",
@@ -196,31 +195,49 @@ function isStatuslineSection(value: string): value is StatuslineSection {
 	);
 }
 
-function parseStatuslineSections(
-	value: unknown,
-): StatuslineSection[] | undefined {
-	if (!Array.isArray(value)) return undefined;
-
+function parseSectionLine(
+	value: unknown[],
+	seen: Set<StatuslineSection>,
+): StatuslineSection[] {
 	const sections: StatuslineSection[] = [];
-	const seen = new Set<StatuslineSection>();
 	for (const item of value) {
 		if (typeof item !== "string" || !isStatuslineSection(item)) continue;
 		if (seen.has(item)) continue;
 		seen.add(item);
 		sections.push(item);
 	}
-
-	return sections.length > 0 ? sections : undefined;
+	return sections;
 }
 
-function getStatuslineSections(ctx: ExtensionContext): StatuslineSection[] {
+function parseStatuslineLayout(value: unknown): StatuslineLayout | undefined {
+	if (!Array.isArray(value)) return undefined;
+
+	const seen = new Set<StatuslineSection>();
+
+	// Detect nested array format: [["model", "git"], ["provider_usage"]]
+	const isNested =
+		value.length > 0 && value.every((item) => Array.isArray(item));
+	if (isNested) {
+		const lines: StatuslineLayout = [];
+		for (const row of value) {
+			const parsed = parseSectionLine(row, seen);
+			if (parsed.length > 0) lines.push(parsed);
+		}
+		return lines.length > 0 ? lines : undefined;
+	}
+
+	// Flat array format: ["model", "git", "context"] → single line
+	const flat = parseSectionLine(value, seen);
+	return flat.length > 0 ? [flat] : undefined;
+}
+
+function getStatuslineLayout(ctx: ExtensionContext): StatuslineLayout {
 	const projectSetting = configuredSectionsFromSettings(
 		ctx.settingsManager?.getProjectSettings?.(),
 	);
 	if (projectSetting.present) {
 		return (
-			parseStatuslineSections(projectSetting.value) ??
-			DEFAULT_STATUSLINE_SECTIONS
+			parseStatuslineLayout(projectSetting.value) ?? DEFAULT_STATUSLINE_LAYOUT
 		);
 	}
 
@@ -229,16 +246,17 @@ function getStatuslineSections(ctx: ExtensionContext): StatuslineSection[] {
 	);
 	if (globalSetting.present) {
 		return (
-			parseStatuslineSections(globalSetting.value) ??
-			DEFAULT_STATUSLINE_SECTIONS
+			parseStatuslineLayout(globalSetting.value) ?? DEFAULT_STATUSLINE_LAYOUT
 		);
 	}
 
-	return DEFAULT_STATUSLINE_SECTIONS;
+	return DEFAULT_STATUSLINE_LAYOUT;
 }
 
 function hasProviderUsageSection(ctx: ExtensionContext): boolean {
-	return getStatuslineSections(ctx).includes("provider_usage");
+	return getStatuslineLayout(ctx).some((line) =>
+		line.includes("provider_usage"),
+	);
 }
 
 function hasNerdFonts(): boolean {
@@ -404,15 +422,16 @@ function sessionCwd(ctx: ExtensionContext): string {
 	return resolve(ctx.sessionManager?.getCwd?.() ?? process.cwd());
 }
 
-function buildCompactLine(
+function buildStatusLines(
 	ctx: ExtensionContext,
 	theme: Theme,
 	footerData: ReadonlyFooterDataProvider | null,
 	onUpdate: () => void,
 	width: number,
-): string {
-	const sections = getStatuslineSections(ctx);
-	const providerUsageEnabled = sections.includes("provider_usage");
+): string[] {
+	const layout = getStatuslineLayout(ctx);
+	const allSections = layout.flat();
+	const providerUsageEnabled = allSections.includes("provider_usage");
 	const providerUsageTargets = providerUsageEnabled
 		? discoverProviderUsageTargets(ctx)
 		: [];
@@ -420,15 +439,16 @@ function buildCompactLine(
 		refreshProviderUsage(ctx, providerUsageTargets, onUpdate);
 	}
 
-	const contextTokens = sections.includes("context")
+	const contextTokens = allSections.includes("context")
 		? collectContextTokens(ctx)
 		: 0;
 	const providerBranch = footerData?.getGitBranch() ?? null;
-	const git = sections.includes("git")
+	const git = allSections.includes("git")
 		? getGitStatus(sessionCwd(ctx), providerBranch, onUpdate)
 		: undefined;
 
 	const renderSectionParts = (
+		sections: StatuslineSection[],
 		providerMode: ProviderUsageRenderMode,
 	): (string | undefined)[] =>
 		sections.map((section) => {
@@ -452,13 +472,27 @@ function buildCompactLine(
 			}
 		});
 
-	const fullLine = formatLine(renderSectionParts("full"));
-	if (!width || displayLength(fullLine) <= width) return fullLine;
+	const lines: string[] = [];
+	for (const lineSections of layout) {
+		const fullLine = formatLine(renderSectionParts(lineSections, "full"));
+		if (!width || displayLength(fullLine) <= width) {
+			if (fullLine) lines.push(fullLine);
+			continue;
+		}
 
-	const activeProviderLine = formatLine(renderSectionParts("active"));
-	if (displayLength(activeProviderLine) <= width) return activeProviderLine;
+		const activeProviderLine = formatLine(
+			renderSectionParts(lineSections, "active"),
+		);
+		if (displayLength(activeProviderLine) <= width) {
+			if (activeProviderLine) lines.push(activeProviderLine);
+			continue;
+		}
 
-	return formatLine(renderSectionParts("omit"));
+		const omitLine = formatLine(renderSectionParts(lineSections, "omit"));
+		if (omitLine) lines.push(omitLine);
+	}
+
+	return lines;
 }
 
 export default function statusline(pi: ExtensionAPI): void {
@@ -513,14 +547,13 @@ export default function statusline(pi: ExtensionAPI): void {
 					invalidate: requestRender,
 					render(width: number): string[] {
 						if (!currentCtx) return [];
-						const line = buildCompactLine(
+						return buildStatusLines(
 							currentCtx,
 							theme,
 							footerData,
 							requestRender,
 							width,
 						);
-						return line ? [line] : [];
 					},
 				};
 			},

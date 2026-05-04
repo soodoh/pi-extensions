@@ -371,7 +371,8 @@ async function getOAuthProviderToken(
 async function getGitHubCopilotUserToken(
 	ctx: ProviderUsageContext,
 ): Promise<string | undefined> {
-	return getOAuthProviderToken(ctx, "github-copilot");
+	const credential = getStoredOAuthCredential(ctx, "github-copilot");
+	return credential?.refresh ?? (await getProviderToken(ctx, "github-copilot"));
 }
 
 function numericField(value: unknown): number | undefined {

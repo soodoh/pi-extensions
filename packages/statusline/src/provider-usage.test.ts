@@ -300,4 +300,79 @@ describe("provider usage", () => {
 		expect(render(targets)).toBe("OR $2.50 · Anth 10%");
 		expect(render(targets, true)).toBe("Anth 10%");
 	});
+
+	test("uses GitHub Copilot refresh token instead of access token for usage endpoint", async () => {
+		const { calls } = fetchCalls(() =>
+			Response.json({
+				quotaSnapshots: {
+					premiumInteractions: { percent_used: 30 },
+				},
+			}),
+		);
+		const ctx: ProviderUsageContext = {
+			modelRegistry: {
+				async getApiKeyForProvider() {
+					return "fallback-token";
+				},
+				authStorage: {
+					get: (provider) =>
+						provider === "github-copilot"
+							? {
+									type: "oauth",
+									access: "copilot-session-token",
+									refresh: "github-oauth-token",
+								}
+							: undefined,
+				},
+			},
+		};
+		const targets: ProviderUsageTarget[] = [
+			{ providerId: "github-copilot", authKind: "oauth", active: true },
+		];
+
+		await refreshAndWait(ctx, targets);
+
+		expect(headersRecord(calls[0].init.headers)).toMatchObject({
+			Authorization: "token github-oauth-token",
+		});
+		expect(render(targets)).toContain("GH 30% mo");
+	});
+
+	test("falls back to getApiKeyForProvider when GitHub Copilot has no refresh token", async () => {
+		const { calls } = fetchCalls(() =>
+			Response.json({
+				quotaSnapshots: {
+					premiumInteractions: { percent_used: 50 },
+				},
+			}),
+		);
+		const ctx: ProviderUsageContext = {
+			modelRegistry: {
+				async getApiKeyForProvider(provider) {
+					return provider === "github-copilot"
+						? "fallback-api-token"
+						: undefined;
+				},
+				authStorage: {
+					get: (provider) =>
+						provider === "github-copilot"
+							? {
+									type: "oauth",
+									access: "copilot-session-token",
+								}
+							: undefined,
+				},
+			},
+		};
+		const targets: ProviderUsageTarget[] = [
+			{ providerId: "github-copilot", authKind: "oauth", active: true },
+		];
+
+		await refreshAndWait(ctx, targets);
+
+		expect(headersRecord(calls[0].init.headers)).toMatchObject({
+			Authorization: "token fallback-api-token",
+		});
+		expect(render(targets)).toContain("GH 50% mo");
+	});
 });

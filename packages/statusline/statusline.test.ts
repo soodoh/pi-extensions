@@ -377,7 +377,7 @@ describe("statusline extension", () => {
 		expect(fetchMock).not.toHaveBeenCalled();
 	});
 
-	test("uses stored GitHub Copilot access credential for OAuth usage by default", async () => {
+	test("uses stored GitHub Copilot refresh credential for OAuth usage", async () => {
 		const fetchCalls: RequestInit[] = [];
 		const fetchMock = vi.fn(
 			async (_url: string | URL | Request, init?: RequestInit) => {
@@ -435,7 +435,7 @@ describe("statusline extension", () => {
 
 			await vi.waitFor(() => expect(fetchMock).toHaveBeenCalled());
 			expect(fetchCalls[0].headers).toMatchObject({
-				Authorization: "token stored-access-token",
+				Authorization: "token stored-refresh-token",
 			});
 		} finally {
 			vi.unstubAllGlobals();

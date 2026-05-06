@@ -67,7 +67,7 @@ Defaults live in [`prompt-suggester.config.json`](./prompt-suggester.config.json
 ```json
 {
   "promptSuggester": {
-    "suggesterModel": "session-default"
+    "suggesterModel": ["session-default"]
   }
 }
 ```
@@ -80,18 +80,18 @@ Place that in:
 
 Key defaults include:
 
-| Setting                                 | Default           | Description                                                                                      |
-| --------------------------------------- | ----------------- | ------------------------------------------------------------------------------------------------ |
-| `suggestion.ghostAcceptKeys`            | `["right"]`       | Keys that accept ghost text into the editor. Supported values are `space`, `right`, and `enter`. |
-| `suggestion.ghostAcceptAndSendKeys`     | `["enter"]`       | Keys that accept the full ghost suggestion and submit it when the editor is empty.               |
-| `suggestion.maxSuggestionChars`         | `200`             | Maximum suggested prompt length.                                                                 |
-| `suggestion.prefillOnlyWhenEditorEmpty` | `true`            | Keeps suggestions from overwriting active typing.                                                |
-| `suggestion.strategy`                   | `compact`         | Suggestion strategy; `transcript-steering` is also supported by the code.                        |
-| `reseed.enabled`                        | `true`            | Enables project seed refreshes.                                                                  |
-| `reseed.checkOnSessionStart`            | `true`            | Checks whether project seed data is stale on startup.                                            |
-| `reseed.checkAfterEveryTurn`            | `true`            | Checks whether project seed data is stale after turns.                                           |
-| `inference.seederModel`                 | `session-default` | Model used for project seeding.                                                                  |
-| `inference.suggesterModel`              | `session-default` | Model used for prompt suggestions, unless overridden in Pi settings.                             |
+| Setting                                 | Default               | Description                                                                                      |
+| --------------------------------------- | --------------------- | ------------------------------------------------------------------------------------------------ |
+| `suggestion.ghostAcceptKeys`            | `["right"]`           | Keys that accept ghost text into the editor. Supported values are `space`, `right`, and `enter`. |
+| `suggestion.ghostAcceptAndSendKeys`     | `["enter"]`           | Keys that accept the full ghost suggestion and submit it when the editor is empty.               |
+| `suggestion.maxSuggestionChars`         | `200`                 | Maximum suggested prompt length.                                                                 |
+| `suggestion.prefillOnlyWhenEditorEmpty` | `true`                | Keeps suggestions from overwriting active typing.                                                |
+| `suggestion.strategy`                   | `compact`             | Suggestion strategy; `transcript-steering` is also supported by the code.                        |
+| `reseed.enabled`                        | `true`                | Enables project seed refreshes.                                                                  |
+| `reseed.checkOnSessionStart`            | `true`                | Checks whether project seed data is stale on startup.                                            |
+| `reseed.checkAfterEveryTurn`            | `true`                | Checks whether project seed data is stale after turns.                                           |
+| `inference.seederModel`                 | `session-default`     | Model used for project seeding.                                                                  |
+| `inference.suggesterModel`              | `["session-default"]` | Ordered model list used for prompt suggestions; the first available entry wins.                  |
 
 ## State and logs
 

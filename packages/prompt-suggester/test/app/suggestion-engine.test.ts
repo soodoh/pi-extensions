@@ -33,7 +33,7 @@ function createConfig(overrides: ConfigOverrides = {}): PromptSuggesterConfig {
 		logging: { level: "info" },
 		inference: {
 			seederModel: "session-default",
-			suggesterModel: "session-default",
+			suggesterModel: ["session-default"],
 			seederThinking: "session-default",
 			suggesterThinking: "session-default",
 		},

@@ -1,3 +1,5 @@
+import { resolveFirstAvailableModel } from "./model-resolution";
+
 type ModelLike = {
 	provider: string;
 	id: string;
@@ -12,7 +14,7 @@ type DisplayContextLike = {
 
 export function getConfiguredModelDisplay(params: {
 	ctx: DisplayContextLike | undefined;
-	configuredModel: string;
+	configuredModel: string[];
 	configuredThinking: string;
 	getSessionThinkingLevel: () => string;
 }): string | undefined {
@@ -22,23 +24,17 @@ export function getConfiguredModelDisplay(params: {
 
 	let provider = ctx.model.provider;
 	let modelId = ctx.model.id;
-	const normalizedModel = configuredModel.trim();
-	if (normalizedModel && normalizedModel !== "session-default") {
-		if (normalizedModel.includes("/")) {
-			const [configuredProvider, ...rest] = normalizedModel.split("/");
-			provider = configuredProvider;
-			modelId = rest.join("/");
-		} else {
-			const matches = ctx.modelRegistry
-				.getAll()
-				.filter((model) => model.id === normalizedModel);
-			if (matches.length === 1) {
-				provider = matches[0].provider;
-				modelId = matches[0].id;
-			} else {
-				modelId = normalizedModel;
-			}
-		}
+	try {
+		const resolved = resolveFirstAvailableModel({
+			currentModel: ctx.model,
+			configuredModelRefs: configuredModel,
+			allModels: ctx.modelRegistry.getAll(),
+		}).model;
+		provider = resolved.provider;
+		modelId = resolved.id;
+	} catch {
+		const firstConfiguredModel = configuredModel[0]?.trim();
+		if (firstConfiguredModel) modelId = firstConfiguredModel;
 	}
 
 	const thinking =

@@ -113,10 +113,7 @@ export class TurnEndOrchestrator {
 			seed,
 			steering,
 			{
-				modelRef:
-					effectiveConfig.inference.suggesterModel === "session-default"
-						? undefined
-						: effectiveConfig.inference.suggesterModel,
+				modelRef: effectiveConfig.inference.suggesterModel,
 				thinkingLevel: toInvocationThinkingLevel(
 					effectiveConfig.inference.suggesterThinking,
 				),

@@ -33,6 +33,7 @@ import {
 } from "../../prompts/seeder-template";
 import { renderSuggestionPrompt } from "../../prompts/suggestion-template";
 import { renderTranscriptSteeringPrompt } from "../../prompts/transcript-steering-template";
+import { resolveFirstAvailableModel } from "../pi/model-resolution";
 import {
 	executeSeederTool,
 	isExpectedSeederToolError,
@@ -76,7 +77,7 @@ interface CompletePromptOptions {
 
 interface ProviderInvocationContext {
 	kind: "suggestion" | "seed";
-	configuredModelRef?: string;
+	configuredModelRef?: string | string[];
 	sessionId?: string;
 	debugMeta?: Record<string, unknown>;
 	allowEmptyText?: boolean;
@@ -175,7 +176,7 @@ class UnsupportedProviderError extends Error {
 	public constructor(
 		public readonly providerApi: string,
 		public readonly model: Model<string>,
-		public readonly configuredModelRef: string | undefined,
+		public readonly configuredModelRef: string | string[] | undefined,
 		public readonly invocationKind: "suggestion" | "seed",
 	) {
 		super(
@@ -919,8 +920,9 @@ export class PiModelClient implements ModelClient {
 		error: UnsupportedProviderError,
 		ctx: ExtensionContextLike,
 	): void {
-		const configuredModelRef =
-			error.configuredModelRef?.trim() || "session-default";
+		const configuredModelRef = Array.isArray(error.configuredModelRef)
+			? error.configuredModelRef.join(", ")
+			: error.configuredModelRef?.trim() || "session-default";
 		const key = `${error.invocationKind}:${error.providerApi}:${configuredModelRef}`;
 		if (this.warnedCompatibilityKeys.has(key)) return;
 		this.warnedCompatibilityKeys.add(key);
@@ -976,27 +978,13 @@ export class PiModelClient implements ModelClient {
 
 	private resolveModelForCall(
 		currentModel: Model<string>,
-		modelRef: string | undefined,
+		modelRef: string | string[] | undefined,
 		allModels: Model<string>[],
 	): Model<string> {
-		const normalized = (modelRef ?? "").trim();
-		if (!normalized) return currentModel;
-		if (normalized.includes("/")) {
-			const [provider, ...rest] = normalized.split("/");
-			const id = rest.join("/");
-			const exact = allModels.find(
-				(entry) => entry.provider === provider && entry.id === id,
-			);
-			if (exact) return exact;
-			throw new Error(`Configured suggester model not found: ${normalized}`);
-		}
-		const candidates = allModels.filter((entry) => entry.id === normalized);
-		if (candidates.length === 1) return candidates[0];
-		if (candidates.length > 1) {
-			throw new Error(
-				`Configured suggester model '${normalized}' is ambiguous. Use provider/id, e.g. ${candidates[0].provider}/${candidates[0].id}`,
-			);
-		}
-		throw new Error(`Configured suggester model not found: ${normalized}`);
+		return resolveFirstAvailableModel({
+			currentModel,
+			configuredModelRefs: modelRef,
+			allModels,
+		}).model;
 	}
 }

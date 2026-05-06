@@ -51,7 +51,7 @@ export interface LoggingConfig {
 
 export interface InferenceConfig {
 	seederModel: string;
-	suggesterModel: string;
+	suggesterModel: string[];
 	seederThinking: ThinkingLevel | InferenceDefault;
 	suggesterThinking: ThinkingLevel | InferenceDefault;
 }

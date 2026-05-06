@@ -29,6 +29,9 @@ const nonEmptyStringSchema = Type.Refine(
 	Type.String(),
 	(value) => value.trim().length > 0,
 );
+const nonEmptyStringArraySchema = Type.Array(nonEmptyStringSchema, {
+	minItems: 1,
+});
 const thinkingLevelSchema = Type.Union([
 	Type.Literal("minimal"),
 	Type.Literal("low"),
@@ -124,7 +127,7 @@ const loggingSchema = Type.Object(
 const inferenceSchema = Type.Object(
 	{
 		seederModel: nonEmptyStringSchema,
-		suggesterModel: nonEmptyStringSchema,
+		suggesterModel: nonEmptyStringArraySchema,
 		seederThinking: thinkingLevelSchema,
 		suggesterThinking: thinkingLevelSchema,
 	},
@@ -461,7 +464,7 @@ function normalizeInferenceConfig(
 		defaults.seederModel,
 	);
 	const suggesterModel = normalizeProperty(
-		nonEmptyStringSchema,
+		nonEmptyStringArraySchema,
 		source?.suggesterModel,
 		defaults.suggesterModel,
 	);

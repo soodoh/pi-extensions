@@ -82,11 +82,14 @@ async function readPiSettingsSuggesterOverride(
 	const suggesterModel = promptSuggester.suggesterModel;
 	if (suggesterModel === undefined) return undefined;
 	if (
-		typeof suggesterModel !== "string" ||
-		suggesterModel.trim().length === 0
+		!Array.isArray(suggesterModel) ||
+		suggesterModel.length === 0 ||
+		!suggesterModel.every(
+			(entry) => typeof entry === "string" && entry.trim().length > 0,
+		)
 	) {
 		throw new Error(
-			`Pi settings ${settingsPath} promptSuggester.suggesterModel must be a non-empty string.`,
+			`Pi settings ${settingsPath} promptSuggester.suggesterModel must be a non-empty array of non-empty strings.`,
 		);
 	}
 

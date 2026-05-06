@@ -41,6 +41,15 @@ test("validateConfig rejects non-objects, unknown keys, and invalid values", () 
 			},
 		}),
 	).toBe(false);
+	expect(
+		validateConfig({
+			...defaultConfig,
+			inference: {
+				...defaultConfig.inference,
+				suggesterModel: "session-default",
+			},
+		}),
+	).toBe(false);
 	expect(validateConfig({ ...defaultConfig, seed: null })).toBe(false);
 	expect(
 		validateConfig({

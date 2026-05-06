@@ -441,6 +441,45 @@ test("PiModelClient falls back to getApiKey for older ModelRegistry versions", a
 	expect(observedOptions?.apiKey).toBe("legacy-token");
 });
 
+test("PiModelClient uses first available configured model", async (t) => {
+	const provider = registerTestProvider(successResponse("fallback suggestion"));
+	t.onTestFinished(() => provider.unregister());
+	const currentModel = {
+		...provider.model,
+		provider: "current",
+		id: "current",
+	};
+	const fallbackModel = {
+		...provider.model,
+		provider: "fallback",
+		id: "model-good",
+	};
+	const client = new PiModelClient({
+		getContext() {
+			return {
+				model: currentModel,
+				modelRegistry: {
+					getAll() {
+						return [currentModel, fallbackModel];
+					},
+					async getApiKeyAndHeaders(requestedModel: TestModel) {
+						expect(requestedModel).toBe(fallbackModel);
+						return { ok: true };
+					},
+				},
+				hasUI: false,
+				ui: { notify() {} },
+			};
+		},
+	});
+
+	const result = await client.generateSuggestion(createSuggestionContext(), {
+		modelRef: ["missing/model", "fallback/model-good"],
+	});
+
+	expect(result.text).toBe("fallback suggestion");
+});
+
 test("PiModelClient surfaces ModelRegistry auth errors", async (t) => {
 	const provider = registerTestProvider(successResponse("ok"));
 	t.onTestFinished(() => provider.unregister());

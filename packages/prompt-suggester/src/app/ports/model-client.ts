@@ -5,7 +5,7 @@ import type { SuggestionPromptContext } from "../services/prompt-context-builder
 import type { TranscriptSuggestionPromptContext } from "../services/transcript-prompt-context-builder";
 
 export interface ModelInvocationSettings {
-	modelRef?: string;
+	modelRef?: string | string[];
 	thinkingLevel?: ThinkingLevel;
 }
 

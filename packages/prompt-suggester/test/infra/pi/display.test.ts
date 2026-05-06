@@ -18,7 +18,7 @@ test("getConfiguredModelDisplay uses configured provider/model and thinking", ()
 	expect(
 		getConfiguredModelDisplay({
 			ctx,
-			configuredModel: "anthropic/claude-sonnet",
+			configuredModel: ["anthropic/claude-sonnet"],
 			configuredThinking: "high",
 			getSessionThinkingLevel: () => "low",
 		}),
@@ -29,9 +29,20 @@ test("getConfiguredModelDisplay falls back to session thinking and ambiguous bar
 	expect(
 		getConfiguredModelDisplay({
 			ctx,
-			configuredModel: "gpt-5",
+			configuredModel: ["gpt-5"],
 			configuredThinking: "session-default",
 			getSessionThinkingLevel: () => "off",
 		}),
 	).toBe("(openai) gpt-5 • thinking off");
+});
+
+test("getConfiguredModelDisplay uses first available configured model", () => {
+	expect(
+		getConfiguredModelDisplay({
+			ctx,
+			configuredModel: ["missing/model", "anthropic/claude-sonnet"],
+			configuredThinking: "medium",
+			getSessionThinkingLevel: () => "off",
+		}),
+	).toBe("(anthropic) claude-sonnet • medium");
 });

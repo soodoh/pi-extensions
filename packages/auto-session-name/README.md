@@ -1,14 +1,17 @@
 # auto-session-name
 
-`auto-session-name` is a small Pi extension that names skill-started sessions from the user's actual request.
+`auto-session-name` names new unnamed Pi sessions after the first assistant turn. It asks a configured model for a short title based only on the cleaned first user message.
 
-## Highlights
+## Behavior
 
-- Detects sessions whose first user message starts with a Pi `<skill name="...">...</skill>` block.
-- Removes the leading skill wrapper and uses the remaining request as the human-readable session title.
-- Formats titles as `<skill-name>: <request>` and truncates them to 72 characters.
-- Names eligible sessions after the first turn when Pi has not already assigned a name.
-- Backfills existing unnamed skill sessions by appending a `session_info` entry to session JSONL files.
+- Runs once on the first `turn_end` (`turnIndex === 0`).
+- Applies to any session whose current name is empty.
+- Preserves existing non-empty names before scheduling and again before setting the generated title.
+- Uses only the first user message; assistant output and later user messages are ignored.
+- If the first message starts with a Pi `<skill ...>...</skill>` block, that leading block is stripped before title generation.
+- Normalizes model output to plain text, up to 8 words and 60 characters.
+- Catches model/config/provider failures and falls back to a deterministic prefix of the cleaned first message.
+- Does not scan or backfill historical session files.
 
 ## Install
 
@@ -36,56 +39,67 @@ To load only `auto-session-name`, add a filtered package entry to `~/.pi/agent/s
 }
 ```
 
-If you prefer SSH, use this source instead:
-
-```text
-git:git@github.com:soodoh/pi-extensions
-```
-
 Restart Pi or run `/reload` after installing.
 
-## Usage
+## Configuration
 
-The extension runs automatically. Start a session through a skill invocation, and when the first turn finishes Pi will receive a session name based on the request.
+Global settings are read from `~/.pi/agent/settings.json`:
 
-For example, a first user message shaped like this:
+```json
+{
+  "autoSessionName": {
+    "enabled": true,
+    "titleModel": ["session-default"]
+  }
+}
+```
+
+Options:
+
+- `autoSessionName.enabled`: defaults to `true`. Set to `false` to disable automatic naming.
+- `autoSessionName.titleModel`: non-empty string array, defaults to `["session-default"]`.
+
+Model references support:
+
+- `session-default` for the active session model.
+- `provider/id` for an exact provider and model id.
+- A bare model id when it uniquely matches one registered model.
+- Ordered fallbacks, for example `["openai/gpt-4.1-mini", "session-default"]`.
+
+Invalid `titleModel` values fall back to `["session-default"]`. If configured models cannot be resolved or generation fails, the extension uses the deterministic first-message fallback title.
+
+## Examples
+
+Plain first message:
+
+```text
+Help me design a reliable backup strategy for my laptop and home server.
+```
+
+Possible title:
+
+```text
+Reliable Backup Strategy
+```
+
+Skill-prefixed first message:
 
 ```xml
 <skill name="planner">...</skill>
 Add README.md for each package
 ```
 
-will be named similar to:
+The model receives only:
 
 ```text
-planner: Add README.md for each package
+Add README.md for each package
 ```
-
-## Configuration
-
-There is no user configuration.
-
-## Storage and backfill
-
-On session startup, the extension performs a one-time scan of existing session files under:
-
-```text
-~/.pi/agent/sessions/**/*.jsonl
-```
-
-For unnamed sessions that started with a skill invocation, it appends a `session_info` entry with the generated title. Malformed or concurrently modified session files are skipped so naming never blocks normal Pi usage.
-
-## Notes
-
-- Existing session names are preserved.
-- Sessions that do not start with a skill block are ignored.
-- Empty requests fall back to `<skill-name> skill session`.
 
 ## Development
 
 From the repository root:
 
 ```bash
-bun run --filter auto-session-name typecheck
 bun run --filter auto-session-name test
+bun run --filter auto-session-name typecheck
 ```

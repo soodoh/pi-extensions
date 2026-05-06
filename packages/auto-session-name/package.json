@@ -2,7 +2,7 @@
 	"name": "auto-session-name",
 	"version": "0.1.0",
 	"type": "module",
-	"description": "Pi extension that names skill-started sessions from the user's actual request.",
+	"description": "Pi extension that names new unnamed sessions from the first user message.",
 	"main": "index.ts",
 	"files": [
 		"index.ts",
@@ -18,5 +18,8 @@
 		"build": "tsc --noEmit",
 		"test": "vitest run --root ../.. packages/auto-session-name",
 		"typecheck": "tsc --noEmit"
+	},
+	"peerDependencies": {
+		"@mariozechner/pi-ai": "*"
 	}
 }
